@@ -3,6 +3,7 @@ model:
   K: 20
   D: 16
   M: 20
+  cue_noise: 0
   noise: 0
   alpha: 1.0
   A: 5

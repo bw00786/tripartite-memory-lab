@@ -14,6 +14,7 @@ SWEEP_LABELS = {
     "capacity": ("Stored memories (M)", "Memory capacity sweep"),
     "noise": ("Chemical noise", "Chemical noise sweep"),
     "cue": ("Cue fraction", "Cue-size sweep"),
+    "cue_noise": ("Cue corruption (fraction replaced)", "Corrupted-cue sweep"),
     "diffusion": ("Diffusion width (sigma)", "Diffusion-width sweep"),
     "sparse_dimension": (
         "Signature dimensions (D)",
@@ -78,6 +79,8 @@ def _condition_label(row: pd.Series) -> str:
         return f"noise={value:g}"
     if sweep == "cue":
         return f"cue_frac={value:g}"
+    if sweep == "cue_noise":
+        return f"cue_noise={value:g}"
     if sweep == "diffusion":
         return f"sigma={value:g}"
     if sweep == "sparse_dimension":
@@ -153,6 +156,8 @@ def create_summary(results_by_config: dict[str, pd.DataFrame]) -> str:
         "significance test. CSV files report each model's 95% bootstrap interval.",
         "CueMatch is a direct lookup baseline that scans the stored patterns; it "
         "is an algorithmic comparator, not a chemical-memory mechanism.",
+        "Positive overlap differences do not necessarily mean exact retrieval; "
+        "use exact_match_rate and its interval in the CSV for that outcome.",
         "",
         (
             "| Model | Mean beats neuron-only? | Conditions with higher mean "

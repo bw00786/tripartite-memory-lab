@@ -13,6 +13,13 @@ def recall_overlap(recalled: np.ndarray, target: np.ndarray, K: int) -> float:
     return float(np.dot(recalled, target) / K)
 
 
+def exact_retrieval(recalled: np.ndarray, target: np.ndarray) -> float:
+    """Return one when recall exactly matches the target pattern, otherwise zero."""
+    if recalled.shape != target.shape:
+        raise ValueError("recalled and target must have the same shape")
+    return float(np.array_equal(recalled, target))
+
+
 def interference(
     recalled: np.ndarray, patterns: np.ndarray, target_index: int, K: int
 ) -> float:

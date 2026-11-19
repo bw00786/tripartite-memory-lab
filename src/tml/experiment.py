@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from tml.metrics import bootstrap_ci, interference, recall_overlap
+from tml.metrics import bootstrap_ci, exact_retrieval, interference, recall_overlap
 from tml.models import (
     CueMatchModel,
     DiffusionMatrix,
@@ -18,17 +18,26 @@ from tml.models import (
     NoAstrocyteMatrix,
     SparseSignatureMatrix,
 )
-from tml.patterns import make_patterns, make_signatures, make_sparse_signatures
+from tml.patterns import (
+    make_cue,
+    make_patterns,
+    make_signatures,
+    make_sparse_signatures,
+)
 
 RESULT_COLUMNS = [
     "model",
     "M",
     "cue_frac",
+    "cue_noise",
     "noise",
     "alpha",
     "mean",
     "ci_low",
     "ci_high",
+    "exact_match_rate",
+    "exact_match_ci_low",
+    "exact_match_ci_high",
     "trials",
     "seed",
 ]
@@ -89,6 +98,7 @@ def run_setting(
         "D",
         "M",
         "cue_frac",
+        "cue_noise",
         "noise",
         "alpha",
         "iters",
@@ -107,13 +117,12 @@ def run_setting(
         raise ValueError("trials must be positive")
     if not 0 < float(p["cue_frac"]) <= 1:
         raise ValueError("cue_frac must be in (0, 1]")
+    if not 0 <= float(p["cue_noise"]) <= 1:
+        raise ValueError("cue_noise must be in [0, 1]")
     if int(p["M"]) < 1:
         raise ValueError("M must be positive")
 
     seed = int(p["seed"])
-    active_cue_count = max(
-        1, min(int(p["K"]), round(int(p["K"]) * float(p["cue_frac"])))
-    )
     selected_models = model_names or ["NeuronOnly", "CueMatch", "Matrix"]
     model_set = (
         dict(models) if models is not None else _model_registry(p, selected_models)
@@ -122,6 +131,7 @@ def run_setting(
         raise ValueError("At least one model is required")
 
     overlaps = {name: [] for name in model_set}
+    exact_matches = {name: [] for name in model_set}
     interference_scores = {name: [] for name in model_set}
     for trial in range(int(p["trials"])):
         pattern_seed, signature_seed, sparse_seed, cue_seed = (
@@ -144,11 +154,12 @@ def run_setting(
         )
         trial_rng = np.random.default_rng(cue_seed)
         target_index = int(trial_rng.integers(int(p["M"])))
-        cue = np.zeros(int(p["N"]), dtype=np.int8)
-        cue_cells = trial_rng.permutation(
-            np.flatnonzero(patterns[target_index])
-        )[:active_cue_count]
-        cue[cue_cells] = 1
+        cue = make_cue(
+            patterns[target_index],
+            float(p["cue_frac"]),
+            float(p["cue_noise"]),
+            trial_rng,
+        )
         for model_index, (name, model) in enumerate(model_set.items()):
             model.store(
                 patterns,
@@ -160,6 +171,9 @@ def run_setting(
             recalled = model.recall(cue, recall_rng)
             overlaps[name].append(
                 recall_overlap(recalled, patterns[target_index], int(p["K"]))
+            )
+            exact_matches[name].append(
+                exact_retrieval(recalled, patterns[target_index])
             )
             interference_scores[name].append(
                 interference(recalled, patterns, target_index, int(p["K"]))
@@ -179,11 +193,17 @@ def run_setting(
         interference_low, interference_high = bootstrap_ci(
             interference_values, metric_rng, n_bootstrap=bootstrap_samples
         )
+        exact_match_low, exact_match_high = bootstrap_ci(
+            np.asarray(exact_matches[name]),
+            metric_rng,
+            n_bootstrap=bootstrap_samples,
+        )
         rows.append(
             {
                 "model": name,
                 "M": int(p["M"]),
                 "cue_frac": float(p["cue_frac"]),
+                "cue_noise": float(p["cue_noise"]),
                 "noise": float(p["noise"]),
                 "alpha": float(p["alpha"]),
                 "D": int(p["D"]),
@@ -195,6 +215,9 @@ def run_setting(
                 "mean": float(overlap_values.mean()),
                 "ci_low": low,
                 "ci_high": high,
+                "exact_match_rate": float(np.mean(exact_matches[name])),
+                "exact_match_ci_low": exact_match_low,
+                "exact_match_ci_high": exact_match_high,
                 "mean_interference": float(interference_values.mean()),
                 "interference_ci_low": interference_low,
                 "interference_ci_high": interference_high,
@@ -221,6 +244,7 @@ def run_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
         "capacity": "M",
         "noise": "noise",
         "cue": "cue_frac",
+        "cue_noise": "cue_noise",
         "sparse_dimension": "D",
         "diffusion": "sigma",
     }.get(sweep_type)

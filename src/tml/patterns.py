@@ -43,3 +43,35 @@ def make_sparse_signatures(
         if not np.any(row):
             row[rng.integers(D)] = rng.choice(np.array([-1, 1], dtype=np.int8))
     return signatures
+
+
+def make_cue(
+    pattern: np.ndarray,
+    cue_frac: float,
+    corruption: float,
+    rng: Generator,
+) -> np.ndarray:
+    """Replace a fraction of target cue cells with non-target distractors."""
+    if pattern.ndim != 1 or not np.all((pattern == 0) | (pattern == 1)):
+        raise ValueError("pattern must be a one-dimensional binary array")
+    if not 0 < cue_frac <= 1:
+        raise ValueError("cue_frac must be in (0, 1]")
+    if not 0 <= corruption <= 1:
+        raise ValueError("corruption must be in [0, 1]")
+
+    target_cells = np.flatnonzero(pattern)
+    if target_cells.size == 0:
+        raise ValueError("pattern must contain at least one active cell")
+    cue_size = max(1, round(target_cells.size * cue_frac))
+    distractor_count = round(cue_size * corruption)
+    retained_count = cue_size - distractor_count
+    distractor_cells = np.flatnonzero(pattern == 0)
+    if distractor_count > distractor_cells.size:
+        raise ValueError("pattern has too few inactive cells for requested corruption")
+
+    cue = np.zeros(pattern.size, dtype=np.int8)
+    if retained_count:
+        cue[rng.choice(target_cells, size=retained_count, replace=False)] = 1
+    if distractor_count:
+        cue[rng.choice(distractor_cells, size=distractor_count, replace=False)] = 1
+    return cue

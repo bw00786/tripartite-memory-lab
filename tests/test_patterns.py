@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from tml.patterns import make_patterns, make_signatures
+from tml.patterns import make_cue, make_patterns, make_signatures
 
 
 def test_patterns_have_exact_activity_and_are_reproducible() -> None:
@@ -36,3 +36,23 @@ def test_invalid_pattern_dimensions_raise(
 def test_invalid_signature_dimensions_raise() -> None:
     with pytest.raises(ValueError, match="M and D"):
         make_signatures(2, 0, np.random.default_rng(0))
+
+
+def test_make_cue_replaces_expected_target_cells_with_distractors() -> None:
+    pattern = np.array([1, 1, 1, 1, 0, 0, 0, 0], dtype=np.int8)
+
+    cue = make_cue(pattern, 0.5, 0.5, np.random.default_rng(10))
+
+    assert cue.sum() == 2
+    assert np.dot(cue, pattern) == 1
+    np.testing.assert_array_equal(
+        cue,
+        make_cue(pattern, 0.5, 0.5, np.random.default_rng(10)),
+    )
+
+
+def test_make_cue_rejects_invalid_corruption() -> None:
+    pattern = np.array([1, 1, 0, 0], dtype=np.int8)
+
+    with pytest.raises(ValueError, match="corruption"):
+        make_cue(pattern, 0.5, 1.1, np.random.default_rng(0))

@@ -4,6 +4,7 @@ model:
   D: 16
   M: 20
   cue_frac: 0.3
+  cue_noise: 0
   alpha: 1.0
   A: 5
   theta: 2

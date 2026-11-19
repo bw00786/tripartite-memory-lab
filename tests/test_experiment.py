@@ -1,7 +1,7 @@
 import numpy as np
 
 from tml.experiment import RESULT_COLUMNS, run_experiment, run_setting
-from tml.metrics import bootstrap_ci, interference, recall_overlap
+from tml.metrics import bootstrap_ci, exact_retrieval, interference, recall_overlap
 
 
 def _small_config() -> dict[str, dict[str, int | float | str]]:
@@ -12,6 +12,7 @@ def _small_config() -> dict[str, dict[str, int | float | str]]:
             "D": 4,
             "M": 3,
             "cue_frac": 0.4,
+            "cue_noise": 0,
             "noise": 0.2,
             "alpha": 1.0,
             "A": 3,
@@ -39,6 +40,12 @@ def test_experiment_returns_required_columns_and_is_reproducible() -> None:
     )
     assert (first["ci_low"] <= first["mean"]).all()
     assert (first["ci_high"] >= first["mean"]).all()
+    assert (
+        first["exact_match_ci_low"] <= first["exact_match_rate"]
+    ).all()
+    assert (
+        first["exact_match_ci_high"] >= first["exact_match_rate"]
+    ).all()
 
 
 def test_capacity_sweep_records_each_setting() -> None:
@@ -59,6 +66,26 @@ def test_noise_sweep_reuses_neuron_patterns_and_trials() -> None:
     neuron_scores = results[results["model"] == "NeuronOnly"]["mean"]
 
     assert neuron_scores.nunique() == 1
+
+
+def test_corrupted_cue_sweep_reports_overlap_and_exact_retrieval() -> None:
+    config = _small_config()
+    config["experiment"] = {
+        "type": "cue_noise",
+        "values": [0.0, 1.0],
+        "models": ["NeuronOnly", "CueMatch"],
+    }
+
+    results = run_experiment(config)
+
+    assert results["sweep_value"].tolist() == [0.0, 0.0, 1.0, 1.0]
+    assert {"exact_match_rate", "exact_match_ci_low", "exact_match_ci_high"} <= set(
+        results.columns
+    )
+    assert results[results["model"] == "CueMatch"]["exact_match_rate"].iloc[0] == 1.0
+    assert (
+        results[results["model"] == "CueMatch"]["exact_match_rate"].iloc[1] < 1.0
+    )
 
 
 def test_requested_variants_appear_in_sweep_results() -> None:
@@ -91,6 +118,7 @@ def test_capacity_sweep_reproduces_prototype_within_tolerance() -> None:
             "D": 16,
             "M": 20,
             "cue_frac": 0.3,
+            "cue_noise": 0,
             "noise": 0,
             "alpha": 1.0,
             "A": 5,
@@ -131,5 +159,7 @@ def test_recall_metrics() -> None:
     recalled = np.array([1, 0, 1, 0])
     patterns = np.array([[1, 1, 0, 0], [1, 0, 1, 0]])
     assert recall_overlap(recalled, target, 2) == 0.5
+    assert exact_retrieval(target, target) == 1.0
+    assert exact_retrieval(recalled, target) == 0.0
     assert interference(recalled, patterns, 0, 2) == 1.0
     assert bootstrap_ci(np.array([0.0, 1.0]), np.random.default_rng(1))[0] <= 0.5
