@@ -5,6 +5,11 @@ model:
   M: 20
   cue_frac: 0.3
   alpha: 1.0
+  A: 5
+  theta: 2
+  sigma: 1.0
+  density: 0.25
+  margin_threshold: 0.1
   iters: 3
   trials: 150
   bootstrap_samples: 2000
@@ -12,3 +17,4 @@ model:
 experiment:
   type: noise
   values: [0, 1, 2, 4, 8]
+  models: [NeuronOnly, Matrix, LocalDomain, Diffusion, SparseSignature, Gated, NoAstrocyte]

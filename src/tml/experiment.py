@@ -7,8 +7,17 @@ import numpy as np
 import pandas as pd
 
 from tml.metrics import bootstrap_ci, interference, recall_overlap
-from tml.models import MatrixModel, Model, NeuronOnlyModel
-from tml.patterns import make_patterns, make_signatures
+from tml.models import (
+    DiffusionMatrix,
+    GatedMatrix,
+    LocalDomainMatrix,
+    MatrixModel,
+    Model,
+    NeuronOnlyModel,
+    NoAstrocyteMatrix,
+    SparseSignatureMatrix,
+)
+from tml.patterns import make_patterns, make_signatures, make_sparse_signatures
 
 RESULT_COLUMNS = [
     "model",
@@ -24,28 +33,51 @@ RESULT_COLUMNS = [
 ]
 
 
-def _model_registry(parameters: Mapping[str, Any]) -> dict[str, Model]:
+def _model_registry(
+    parameters: Mapping[str, Any], names: list[str]
+) -> dict[str, Model]:
     common = {
         "N": int(parameters["N"]),
         "K": int(parameters["K"]),
         "iters": int(parameters["iters"]),
     }
-    return {
-        "NeuronOnly": NeuronOnlyModel(**common),
-        "Matrix": MatrixModel(
-            **common,
-            D=int(parameters["D"]),
-            noise=float(parameters["noise"]),
-            alpha=float(parameters["alpha"]),
-            seed=int(parameters["seed"]),
+    matrix = {
+        **common,
+        "D": int(parameters["D"]),
+        "noise": float(parameters["noise"]),
+        "alpha": float(parameters["alpha"]),
+        "seed": int(parameters["seed"]),
+    }
+    constructors = {
+        "NeuronOnly": lambda: NeuronOnlyModel(**common),
+        "Matrix": lambda: MatrixModel(**matrix),
+        "LocalDomain": lambda: LocalDomainMatrix(
+            **matrix, A=int(parameters["A"]), theta=int(parameters["theta"])
+        ),
+        "Diffusion": lambda: DiffusionMatrix(
+            **matrix, sigma=float(parameters["sigma"])
+        ),
+        "SparseSignature": lambda: SparseSignatureMatrix(
+            **matrix, density=float(parameters["density"])
+        ),
+        "Gated": lambda: GatedMatrix(
+            **matrix, margin_threshold=float(parameters["margin_threshold"])
+        ),
+        "NoAstrocyte": lambda: NoAstrocyteMatrix(
+            **matrix, A=int(parameters["A"]), theta=int(parameters["theta"])
         ),
     }
+    unknown = set(names) - constructors.keys()
+    if unknown:
+        raise ValueError(f"Unknown model names: {', '.join(sorted(unknown))}")
+    return {name: constructors[name]() for name in names}
 
 
 def run_setting(
     parameters: Mapping[str, Any],
     models: Mapping[str, Model] | None = None,
     setting_index: int = 0,
+    model_names: list[str] | None = None,
 ) -> pd.DataFrame:
     """Run one setting and return per-model recall and interference summaries."""
     p = dict(parameters)
@@ -60,6 +92,11 @@ def run_setting(
         "iters",
         "trials",
         "seed",
+        "A",
+        "theta",
+        "sigma",
+        "density",
+        "margin_threshold",
     )
     missing = [key for key in required if key not in p]
     if missing:
@@ -80,11 +117,19 @@ def run_setting(
     active_cue_count = max(
         1, min(int(p["K"]), round(int(p["K"]) * float(p["cue_frac"])))
     )
-    model_set = dict(models) if models is not None else _model_registry(p)
+    selected_models = model_names or ["NeuronOnly", "Matrix"]
+    model_set = (
+        dict(models) if models is not None else _model_registry(p, selected_models)
+    )
     if not model_set:
         raise ValueError("At least one model is required")
-    for model in model_set.values():
-        model.store(patterns, signatures)
+    sparse_signatures = make_sparse_signatures(
+        int(p["M"]), int(p["D"]), data_rng, float(p["density"])
+    )
+    for name, model in model_set.items():
+        model.store(
+            patterns, sparse_signatures if name == "SparseSignature" else signatures
+        )
 
     overlaps = {name: [] for name in model_set}
     interference_scores = {name: [] for name in model_set}
@@ -150,9 +195,10 @@ def run_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
         raise ValueError("Config must contain model and experiment sections")
     base = dict(config["model"])
     experiment = dict(config["experiment"])
+    model_names = experiment.get("models", ["NeuronOnly", "Matrix"])
     sweep_type = experiment.get("type", "baseline")
     if sweep_type == "baseline":
-        return run_setting(base)
+        return run_setting(base, model_names=model_names)
 
     parameter_name = {
         "capacity": "M",
@@ -172,7 +218,9 @@ def run_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
         setting = {**base, parameter_name: value}
         if setting_index:
             setting["seed"] = int(base["seed"])
-        frame = run_setting(setting, setting_index=setting_index)
+        frame = run_setting(
+            setting, model_names=model_names, setting_index=setting_index
+        )
         frame["sweep"] = sweep_type
         frame["sweep_value"] = value
         results.append(frame)

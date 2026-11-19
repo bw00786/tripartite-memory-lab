@@ -14,6 +14,11 @@ def _small_config() -> dict[str, dict[str, int | float | str]]:
             "cue_frac": 0.4,
             "noise": 0.2,
             "alpha": 1.0,
+            "A": 3,
+            "theta": 2,
+            "sigma": 1.0,
+            "density": 0.25,
+            "margin_threshold": 0.1,
             "iters": 2,
             "trials": 12,
             "seed": 17,
@@ -46,6 +51,27 @@ def test_capacity_sweep_records_each_setting() -> None:
     assert results["sweep_value"].tolist() == [2, 2, 4, 4]
 
 
+def test_requested_variants_appear_in_sweep_results() -> None:
+    config = _small_config()
+    config["experiment"] = {
+        "type": "noise",
+        "values": [0.0],
+        "models": [
+            "NeuronOnly",
+            "Matrix",
+            "LocalDomain",
+            "Diffusion",
+            "SparseSignature",
+            "Gated",
+            "NoAstrocyte",
+        ],
+    }
+
+    results = run_experiment(config)
+
+    assert set(config["experiment"]["models"]) == set(results["model"])
+
+
 def test_default_load_reproduces_matrix_prototype_within_tolerance() -> None:
     config = {
         "model": {
@@ -56,6 +82,11 @@ def test_default_load_reproduces_matrix_prototype_within_tolerance() -> None:
             "cue_frac": 0.3,
             "noise": 0,
             "alpha": 1.0,
+            "A": 5,
+            "theta": 2,
+            "sigma": 1.0,
+            "density": 0.25,
+            "margin_threshold": 0.1,
             "iters": 3,
             "trials": 150,
             "bootstrap_samples": 500,

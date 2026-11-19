@@ -1,8 +1,16 @@
 import numpy as np
 import pytest
 
-from tml.models import MatrixModel, NeuronOnlyModel
-from tml.patterns import make_patterns, make_signatures
+from tml.models import (
+    DiffusionMatrix,
+    GatedMatrix,
+    LocalDomainMatrix,
+    MatrixModel,
+    NeuronOnlyModel,
+    NoAstrocyteMatrix,
+    SparseSignatureMatrix,
+)
+from tml.patterns import make_patterns, make_signatures, make_sparse_signatures
 
 
 def test_neuron_only_recall_meets_low_load_acceptance() -> None:
@@ -59,3 +67,44 @@ def test_matrix_model_requires_matching_signatures() -> None:
     patterns = make_patterns(10, 3, 2, np.random.default_rng(0))
     with pytest.raises(ValueError, match="shape"):
         model.store(patterns, np.ones((2, 3)))
+
+
+@pytest.mark.parametrize(
+    ("model_type", "variant_options"),
+    [
+        (LocalDomainMatrix, {"A": 4, "theta": 2}),
+        (DiffusionMatrix, {"sigma": 1.5}),
+        (SparseSignatureMatrix, {"density": 0.25}),
+        (GatedMatrix, {"margin_threshold": 0.1}),
+        (NoAstrocyteMatrix, {"A": 4, "theta": 2}),
+    ],
+)
+def test_variant_models_return_deterministic_k_active_states(
+    model_type, variant_options
+) -> None:
+    data_rng = np.random.default_rng(42)
+    patterns = make_patterns(40, 5, 6, data_rng)
+    signatures = make_signatures(6, 8, data_rng)
+    if model_type is SparseSignatureMatrix:
+        signatures = make_sparse_signatures(6, 8, data_rng, density=0.25)
+    options = {
+        "N": 40,
+        "K": 5,
+        "D": 8,
+        "seed": 12,
+        **variant_options,
+    }
+    first = model_type(**options)
+    second = model_type(**options)
+    first.store(patterns, signatures)
+    second.store(patterns, signatures)
+    cue = np.zeros(40, dtype=np.int8)
+    cue[np.flatnonzero(patterns[0])[:2]] = 1
+
+    recalled = first.recall(cue, np.random.default_rng(1))
+
+    assert recalled.shape == (40,)
+    assert recalled.sum() == 5
+    np.testing.assert_array_equal(
+        recalled, second.recall(cue, np.random.default_rng(2))
+    )
