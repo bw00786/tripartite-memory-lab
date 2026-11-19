@@ -1,0 +1,21 @@
+model:
+  N: 200
+  K: 20
+  D: 16
+  M: 20
+  cue_frac: 0.3
+  noise: 0
+  alpha: 1.0
+  A: 5
+  theta: 2
+  sigma: 1.0
+  density: 0.25
+  margin_threshold: 0.1
+  iters: 3
+  trials: 150
+  bootstrap_samples: 2000
+  seed: 1
+experiment:
+  type: diffusion
+  values: [0, 0.5, 1, 2, 4, 8]
+  models: [NeuronOnly, Diffusion]
