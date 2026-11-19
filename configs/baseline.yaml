@@ -17,3 +17,4 @@ model:
   seed: 1
 experiment:
   type: baseline
+  models: [NeuronOnly, CueMatch, Matrix]

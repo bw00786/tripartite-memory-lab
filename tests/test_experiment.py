@@ -33,7 +33,7 @@ def test_experiment_returns_required_columns_and_is_reproducible() -> None:
     second = run_experiment(_small_config())
 
     assert set(RESULT_COLUMNS).issubset(first.columns)
-    assert first["model"].tolist() == ["NeuronOnly", "Matrix"]
+    assert first["model"].tolist() == ["NeuronOnly", "CueMatch", "Matrix"]
     np.testing.assert_array_equal(
         first.select_dtypes("number"), second.select_dtypes("number")
     )
@@ -47,8 +47,8 @@ def test_capacity_sweep_records_each_setting() -> None:
 
     results = run_experiment(config)
 
-    assert results["M"].tolist() == [2, 2, 4, 4]
-    assert results["sweep_value"].tolist() == [2, 2, 4, 4]
+    assert results["M"].tolist() == [2, 2, 2, 4, 4, 4]
+    assert results["sweep_value"].tolist() == [2, 2, 2, 4, 4, 4]
 
 
 def test_noise_sweep_reuses_neuron_patterns_and_trials() -> None:
@@ -68,6 +68,7 @@ def test_requested_variants_appear_in_sweep_results() -> None:
         "values": [0.0],
         "models": [
             "NeuronOnly",
+            "CueMatch",
             "Matrix",
             "LocalDomain",
             "Diffusion",
@@ -109,6 +110,7 @@ def test_capacity_sweep_reproduces_prototype_within_tolerance() -> None:
 
     expected = {
         "NeuronOnly": {5: 1.00, 20: 0.99, 40: 0.71},
+        "CueMatch": {5: 1.00, 20: 1.00, 40: 1.00},
         "Matrix": {5: 1.00, 20: 0.86, 40: 0.50},
     }
     for row in results.itertuples():

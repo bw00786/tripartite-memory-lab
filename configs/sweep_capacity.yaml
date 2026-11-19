@@ -17,4 +17,4 @@ model:
 experiment:
   type: capacity
   values: [5, 20, 40]
-  models: [NeuronOnly, Matrix, LocalDomain, Diffusion, SparseSignature, Gated, NoAstrocyte]
+  models: [NeuronOnly, CueMatch, Matrix, LocalDomain, Diffusion, SparseSignature, Gated, NoAstrocyte]

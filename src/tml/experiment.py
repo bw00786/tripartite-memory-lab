@@ -8,6 +8,7 @@ import pandas as pd
 
 from tml.metrics import bootstrap_ci, interference, recall_overlap
 from tml.models import (
+    CueMatchModel,
     DiffusionMatrix,
     GatedMatrix,
     LocalDomainMatrix,
@@ -50,6 +51,7 @@ def _model_registry(
     }
     constructors = {
         "NeuronOnly": lambda: NeuronOnlyModel(**common),
+        "CueMatch": lambda: CueMatchModel(**common),
         "Matrix": lambda: MatrixModel(**matrix),
         "LocalDomain": lambda: LocalDomainMatrix(
             **matrix, A=int(parameters["A"]), theta=int(parameters["theta"])
@@ -112,7 +114,7 @@ def run_setting(
     active_cue_count = max(
         1, min(int(p["K"]), round(int(p["K"]) * float(p["cue_frac"])))
     )
-    selected_models = model_names or ["NeuronOnly", "Matrix"]
+    selected_models = model_names or ["NeuronOnly", "CueMatch", "Matrix"]
     model_set = (
         dict(models) if models is not None else _model_registry(p, selected_models)
     )
@@ -210,7 +212,7 @@ def run_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
         raise ValueError("Config must contain model and experiment sections")
     base = dict(config["model"])
     experiment = dict(config["experiment"])
-    model_names = experiment.get("models", ["NeuronOnly", "Matrix"])
+    model_names = experiment.get("models", ["NeuronOnly", "CueMatch", "Matrix"])
     sweep_type = experiment.get("type", "baseline")
     if sweep_type == "baseline":
         return run_setting(base, model_names=model_names)

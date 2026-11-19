@@ -17,4 +17,4 @@ model:
 experiment:
   type: noise
   values: [0, 1, 2, 4, 8]
-  models: [NeuronOnly, Matrix, LocalDomain, Diffusion, SparseSignature, Gated, NoAstrocyte]
+  models: [NeuronOnly, CueMatch, Matrix, LocalDomain, Diffusion, SparseSignature, Gated, NoAstrocyte]

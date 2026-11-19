@@ -68,6 +68,12 @@ trials per setting, and seed 1.
   uses `W = P.T @ P` with a zero diagonal. Each recall iteration multiplies by
   W, divides by the population standard deviation, and selects the top K
   neurons. Equal scores are resolved by neuron index.
+- **CueMatch:** Scores every stored pattern by the number of active cue cells
+  it contains and returns the highest-scoring stored pattern (ties select the
+  earliest stored pattern). This is direct exemplar lookup, included as an
+  algorithmic retrieval reference. It has access to the full pattern bank and
+  is not an apples-to-apples comparison with the neuron-only or chemical
+  dynamics models.
 - **Matrix:** Assigns each memory a bipolar signature and builds a local
   imprint `T = P.T @ S`. Optional Gaussian blur is scaled by
   `noise * sqrt(M*K/N)`. Each iteration binds the active cells' imprints,
@@ -107,19 +113,27 @@ work-order reference values within ±0.05:
 | Memories (M) | Neuron-only mean (95% CI) | Matrix mean (95% CI) |
 |---:|---:|---:|
 | 5 | 1.000 [1.000, 1.000] | 1.000 [1.000, 1.000] |
-| 20 | 0.981 [0.969, 0.991] | 0.854 [0.826, 0.882] |
+| 20 | 0.981 [0.969, 0.991] | 0.854 [0.827, 0.882] |
 | 40 | 0.714 [0.687, 0.742] | 0.506 [0.478, 0.535] |
+
+After adding CueMatch, it scored 1.000 mean recall at M=20 and M=40 in the
+configured capacity sweep and 0.984 to 1.000 over cue fractions 0.1 to 0.5.
+These high values mean that this seeded pattern/cue task usually identifies
+the exact stored exemplar; they should not be interpreted as evidence that
+CueMatch models human memory or any other cognitive property. Directly
+returning a stored item differs from reconstructing one through distributed
+weights.
 
 Across the tested noise values 0, 1, 2, 4, and 8, the Matrix means were
 0.854, 0.820, 0.778, 0.747, and 0.741, respectively, versus 0.981 for the
 neuron-only model. In the cue sweep, Matrix mean recall ranged from 0.693 to
 0.893, while neuron-only ranged from 0.838 to 0.990. The generated
-`results/summary.md` reports that no tested variant beat the neuron-only model
-in mean recall in any tested condition. In particular, SparseSignature
-improved as D increased, reaching 0.929 at D=64, but did not exceed the
-neuron-only reference. No noise level with a positive chemical-layer advantage
-was observed, so there is no tested noise breakpoint at which such an
-advantage disappears.
+`results/summary.md` reports that no tested chemical-matrix variant beat the
+neuron-only model in mean recall in any tested condition. In particular,
+SparseSignature improved as D increased, reaching 0.929 at D=64, but did not
+exceed the neuron-only reference (95% CI 0.908 to 0.950). No noise level with
+a positive chemical-layer advantage was observed, so there is no tested noise
+breakpoint at which such an advantage disappears.
 
 These are outcomes for the configured model and finite seeded trials, not
 claims about untested parameter settings. Negative results are retained in the

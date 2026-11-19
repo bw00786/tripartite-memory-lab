@@ -18,4 +18,4 @@ model:
 experiment:
   type: diffusion
   values: [0, 0.5, 1, 2, 4, 8]
-  models: [NeuronOnly, Diffusion]
+  models: [NeuronOnly, CueMatch, Diffusion]

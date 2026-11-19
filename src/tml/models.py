@@ -80,6 +80,23 @@ class NeuronOnlyModel(Model):
         return state
 
 
+class CueMatchModel(Model):
+    """Retrieve the stored pattern with the greatest overlap with the cue."""
+
+    def store(self, P: np.ndarray, S: np.ndarray | None = None) -> None:
+        self._validate_patterns(P)
+        self.patterns = np.asarray(P, dtype=np.int8).copy()
+
+    def recall(self, cue: np.ndarray, rng: Generator) -> np.ndarray:
+        del rng
+        state = self._validate_cue(cue)
+        if self.patterns is None:
+            raise RuntimeError("store must be called before recall")
+        cue_matches = self.patterns @ state
+        memory_index = int(np.argmax(cue_matches))
+        return self.patterns[memory_index].copy()
+
+
 class MatrixModel(NeuronOnlyModel):
     """Associative-memory baseline augmented with a blurred chemical imprint."""
 

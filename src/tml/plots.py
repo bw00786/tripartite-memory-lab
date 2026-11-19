@@ -151,9 +151,11 @@ def create_summary(results_by_config: dict[str, pd.DataFrame]) -> str:
         "",
         "Positive mean differences are descriptive; they are not by themselves a "
         "significance test. CSV files report each model's 95% bootstrap interval.",
+        "CueMatch is a direct lookup baseline that scans the stored patterns; it "
+        "is an algorithmic comparator, not a chemical-memory mechanism.",
         "",
         (
-            "| Variant | Mean beats neuron-only? | Conditions with higher mean "
+            "| Model | Mean beats neuron-only? | Conditions with higher mean "
             "recall | Noise advantage disappears |"
         ),
         "|---|---|---|---|",
@@ -181,7 +183,9 @@ def create_summary(results_by_config: dict[str, pd.DataFrame]) -> str:
         positive_noises = [
             noise for noise, difference in noise_points if difference > 0
         ]
-        if not positive_noises:
+        if variant == "CueMatch":
+            noise_status = "Not applicable; algorithm does not use chemical noise"
+        elif not positive_noises:
             noise_status = "No advantage observed at tested noise levels"
         else:
             first_advantage_noise = min(positive_noises)

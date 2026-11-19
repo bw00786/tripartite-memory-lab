@@ -17,4 +17,4 @@ model:
 experiment:
   type: cue
   values: [0.1, 0.2, 0.3, 0.5]
-  models: [NeuronOnly, Matrix, LocalDomain, Diffusion, SparseSignature, Gated, NoAstrocyte]
+  models: [NeuronOnly, CueMatch, Matrix, LocalDomain, Diffusion, SparseSignature, Gated, NoAstrocyte]

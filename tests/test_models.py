@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from tml.models import (
+    CueMatchModel,
     DiffusionMatrix,
     GatedMatrix,
     LocalDomainMatrix,
@@ -39,6 +40,31 @@ def test_neuron_only_checks_input_and_storage() -> None:
         model.recall(np.zeros(10), np.random.default_rng(0))
     with pytest.raises(ValueError, match="exactly K"):
         model.store(np.zeros((2, 10)))
+
+
+def test_cue_match_retrieves_the_best_matching_stored_pattern() -> None:
+    patterns = np.array(
+        [
+            [1, 1, 1, 0, 0, 0],
+            [1, 1, 0, 1, 0, 0],
+            [0, 0, 0, 1, 1, 1],
+        ],
+        dtype=np.int8,
+    )
+    cue = np.array([1, 1, 0, 0, 0, 0], dtype=np.int8)
+    model = CueMatchModel(N=6, K=3)
+    model.store(patterns)
+
+    recalled = model.recall(cue, np.random.default_rng(1))
+
+    np.testing.assert_array_equal(recalled, patterns[0])
+
+
+def test_cue_match_recall_requires_stored_patterns() -> None:
+    model = CueMatchModel(N=6, K=3)
+
+    with pytest.raises(RuntimeError, match="store must be called"):
+        model.recall(np.zeros(6, dtype=np.int8), np.random.default_rng(0))
 
 
 def test_matrix_model_is_deterministic_and_uses_expected_shapes() -> None:
