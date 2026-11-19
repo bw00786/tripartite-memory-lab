@@ -109,11 +109,6 @@ def run_setting(
         raise ValueError("M must be positive")
 
     seed = int(p["seed"])
-    data_seed, trials_seed = np.random.SeedSequence([seed, setting_index]).spawn(2)
-    data_rng = np.random.default_rng(data_seed)
-    trial_rng = np.random.default_rng(trials_seed)
-    patterns = make_patterns(int(p["N"]), int(p["K"]), int(p["M"]), data_rng)
-    signatures = make_signatures(int(p["M"]), int(p["D"]), data_rng)
     active_cue_count = max(
         1, min(int(p["K"]), round(int(p["K"]) * float(p["cue_frac"])))
     )
@@ -123,26 +118,40 @@ def run_setting(
     )
     if not model_set:
         raise ValueError("At least one model is required")
-    sparse_signatures = make_sparse_signatures(
-        int(p["M"]), int(p["D"]), data_rng, float(p["density"])
-    )
-    for name, model in model_set.items():
-        model.store(
-            patterns, sparse_signatures if name == "SparseSignature" else signatures
-        )
 
     overlaps = {name: [] for name in model_set}
     interference_scores = {name: [] for name in model_set}
     for trial in range(int(p["trials"])):
+        pattern_seed, signature_seed, sparse_seed, cue_seed = (
+            np.random.SeedSequence([seed, trial]).spawn(4)
+        )
+        patterns = make_patterns(
+            int(p["N"]),
+            int(p["K"]),
+            int(p["M"]),
+            np.random.default_rng(pattern_seed),
+        )
+        signatures = make_signatures(
+            int(p["M"]), int(p["D"]), np.random.default_rng(signature_seed)
+        )
+        sparse_signatures = make_sparse_signatures(
+            int(p["M"]),
+            int(p["D"]),
+            np.random.default_rng(sparse_seed),
+            float(p["density"]),
+        )
+        trial_rng = np.random.default_rng(cue_seed)
         target_index = int(trial_rng.integers(int(p["M"])))
         cue = np.zeros(int(p["N"]), dtype=np.int8)
-        cue_cells = trial_rng.choice(
-            np.flatnonzero(patterns[target_index]),
-            size=active_cue_count,
-            replace=False,
-        )
+        cue_cells = trial_rng.permutation(
+            np.flatnonzero(patterns[target_index])
+        )[:active_cue_count]
         cue[cue_cells] = 1
         for model_index, (name, model) in enumerate(model_set.items()):
+            model.store(
+                patterns,
+                sparse_signatures if name == "SparseSignature" else signatures,
+            )
             recall_rng = np.random.default_rng(
                 np.random.SeedSequence([seed, setting_index, trial, model_index + 1])
             )

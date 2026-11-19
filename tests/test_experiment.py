@@ -51,6 +51,16 @@ def test_capacity_sweep_records_each_setting() -> None:
     assert results["sweep_value"].tolist() == [2, 2, 4, 4]
 
 
+def test_noise_sweep_reuses_neuron_patterns_and_trials() -> None:
+    config = _small_config()
+    config["experiment"] = {"type": "noise", "values": [0.0, 3.0]}
+
+    results = run_experiment(config)
+    neuron_scores = results[results["model"] == "NeuronOnly"]["mean"]
+
+    assert neuron_scores.nunique() == 1
+
+
 def test_requested_variants_appear_in_sweep_results() -> None:
     config = _small_config()
     config["experiment"] = {
@@ -72,7 +82,7 @@ def test_requested_variants_appear_in_sweep_results() -> None:
     assert set(config["experiment"]["models"]) == set(results["model"])
 
 
-def test_default_load_reproduces_matrix_prototype_within_tolerance() -> None:
+def test_capacity_sweep_reproduces_prototype_within_tolerance() -> None:
     config = {
         "model": {
             "N": 200,
@@ -92,13 +102,17 @@ def test_default_load_reproduces_matrix_prototype_within_tolerance() -> None:
             "bootstrap_samples": 500,
             "seed": 1,
         },
-        "experiment": {"type": "baseline"},
+        "experiment": {"type": "capacity", "values": [5, 20, 40]},
     }
 
-    results = run_experiment(config).set_index("model")
+    results = run_experiment(config)
 
-    assert abs(results.loc["NeuronOnly", "mean"] - 0.99) <= 0.05
-    assert abs(results.loc["Matrix", "mean"] - 0.86) <= 0.05
+    expected = {
+        "NeuronOnly": {5: 1.00, 20: 0.99, 40: 0.71},
+        "Matrix": {5: 1.00, 20: 0.86, 40: 0.50},
+    }
+    for row in results.itertuples():
+        assert abs(row.mean - expected[row.model][row.M]) <= 0.05
 
 
 def test_setting_validates_required_parameters() -> None:

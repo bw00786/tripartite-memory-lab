@@ -101,6 +101,7 @@ class MatrixModel(NeuronOnlyModel):
         self.alpha = alpha
         self.seed = seed
         self.imprint: np.ndarray | None = None
+        self._noise_rng = np.random.default_rng(seed)
 
     def _chemical_scores(self, state: np.ndarray) -> np.ndarray:
         if self.imprint is None:
@@ -121,7 +122,7 @@ class MatrixModel(NeuronOnlyModel):
         self.imprint = np.asarray(P, dtype=float).T @ signatures
         blur_scale = self.noise * np.sqrt(P.shape[0] * self.K / self.N)
         if blur_scale:
-            self.imprint += np.random.default_rng(self.seed).normal(
+            self.imprint += self._noise_rng.normal(
                 0.0, blur_scale, size=self.imprint.shape
             )
 
