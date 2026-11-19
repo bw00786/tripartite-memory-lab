@@ -1,0 +1,13 @@
+model:
+  N: 200
+  K: 20
+  D: 16
+  M: 20
+  noise: 0
+  alpha: 1.0
+  iters: 3
+  trials: 150
+  seed: 1
+experiment:
+  type: cue
+  values: [0.1, 0.2, 0.3, 0.5]
