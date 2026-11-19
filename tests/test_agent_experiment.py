@@ -1,6 +1,9 @@
+import json
+
 import numpy as np
 
 from tml.agent_experiment import run_agent_experiment
+from tml.local_model_experiment import run_local_agent_experiment
 
 
 def _config(
@@ -354,3 +357,71 @@ def test_cue_token_policy_keeps_structured_tasks_on_exact_keys() -> None:
     results = run_agent_experiment(config)
 
     assert (results["mean_accuracy"] == 1.0).all()
+
+
+class _FakeChatClient:
+    model_name = "fake-local"
+    model_digest = "fake-digest"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def chat(self, system: str, user: str) -> dict:
+        del system
+        self.calls += 1
+        payload = json.loads(user)
+        if "records" in payload:
+            records = payload["records"]
+            query_keys = payload["queries"]
+            answers = {}
+            for key, query in query_keys.items():
+                record = next(
+                    (item for item in records if item["key"] in query), None
+                )
+                answers[key] = record["value"] if record else None
+            confidences = {key: 0.95 for key in query_keys}
+        else:
+            report = payload["agent_reports"][0]
+            answers = report["answers"]
+            confidences = report["confidence"]
+        return {
+            "message": {
+                "content": json.dumps(
+                    {"answers": answers, "confidence": confidences}
+                )
+            },
+            "prompt_eval_count": 12,
+            "eval_count": 8,
+            "total_duration": 1_000_000,
+        }
+
+
+def test_local_model_runner_uses_client_and_records_inference_metadata() -> None:
+    config = _config(
+        ["delayed_retrieval"],
+        ["single_agent"],
+        team_sizes=[1],
+        trials=2,
+    )
+    config["model"].update(
+        {
+            "backend": "ollama",
+            "model_name": "fake-local",
+            "base_url": "http://localhost:11434",
+            "num_ctx": 1024,
+            "num_predict": 32,
+            "timeout_seconds": 2,
+        }
+    )
+    client = _FakeChatClient()
+
+    results = run_local_agent_experiment(config, client=client)
+
+    assert client.calls == 2
+    assert results.loc[0, "mean_accuracy"] == 1.0
+    assert results.loc[0, "model_name"] == "fake-local"
+    assert results.loc[0, "model_digest"] == "fake-digest"
+    assert results.loc[0, "mean_model_calls"] == 1.0
+    assert results.loc[0, "mean_prompt_tokens"] == 12.0
+    assert results.loc[0, "mean_completion_tokens"] == 8.0
+    assert results.loc[0, "mean_parse_failures"] == 0.0

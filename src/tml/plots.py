@@ -345,22 +345,25 @@ def write_agent_summary(
     lines = [
         "# Agent memory experiment summary",
         "",
-        "These results measure a deterministic memory-policy simulation, not "
-        "language-model agents. Latency is local wall-clock time; API cost is "
-        "zero because no external model is called. Compute units count stored "
-        "records, scanned records, and inter-agent messages. Team-size setting "
-        "is the configured team size; single_agent always uses one agent.",
+        "Backend and model are recorded for each row. deterministic_simulator "
+        "rows are policy simulations; Ollama rows use the named local model. "
+        "Latency is local wall-clock time. API cost is zero because no paid "
+        "external inference API is used; local compute and energy costs are not "
+        "estimated. Team-size setting is configured team size; single_agent "
+        "always uses one agent.",
         "",
         (
-            "| Config | Task | Setup | Retrieval policy | Intervention | "
+            "| Config | Task | Setup | Backend/model | Retrieval policy | "
+            "Intervention | "
             "Team-size setting | Accuracy (95% CI) | Exact "
             "retrieval (95% CI) | Paired accuracy delta vs single-agent (95% CI) | "
             "Paired accuracy delta vs exact-key (95% CI) | "
             "Stale errors | Conflict errors | "
-            "Uncertainty errors | Brier score | "
+            "Uncertainty errors | Brier score | Model calls | Prompt tokens | "
+            "Completion tokens | Parse failures | "
             "Latency ms | Compute units | API cost USD |"
         ),
-        "|---|---|---|---|---|---:|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
+        "|---|---|---|---|---|---|---:|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for config_name, frame in results_by_config.items():
         if not {"task", "setup", "team_size", "mean_accuracy"}.issubset(
@@ -369,6 +372,13 @@ def write_agent_summary(
             continue
         for row in frame.itertuples():
             retrieval_policy = getattr(row, "retrieval_policy", "exact_key")
+            model_name = getattr(row, "model_name", "deterministic_simulator")
+            model_digest = getattr(row, "model_digest", "")
+            model_label = (
+                f"{model_name} ({model_digest[:12]})"
+                if model_digest
+                else model_name
+            )
             sweep_name = getattr(row, "sweep", "")
             sweep_value = getattr(row, "sweep_value", "")
             intervention = (
@@ -397,7 +407,8 @@ def write_agent_summary(
                 )
             lines.append(
                 f"| {config_name} | {row.task} | {row.setup} | "
-                f"{retrieval_policy} | {intervention} | {row.team_size} | "
+                f"{model_label} | {retrieval_policy} | {intervention} | "
+                f"{row.team_size} | "
                 f"{row.mean_accuracy:.3f} "
                 f"[{row.accuracy_ci_low:.3f}, {row.accuracy_ci_high:.3f}] | "
                 f"{row.mean_exact_retrieval:.3f} "
@@ -409,6 +420,10 @@ def write_agent_summary(
                 f"{row.mean_conflict_error_rate:.3f} | "
                 f"{row.mean_uncertainty_error_rate:.3f} | "
                 f"{row.mean_uncertainty_brier:.3f} | "
+                f"{getattr(row, 'mean_model_calls', 0.0):.1f} | "
+                f"{getattr(row, 'mean_prompt_tokens', 0.0):.1f} | "
+                f"{getattr(row, 'mean_completion_tokens', 0.0):.1f} | "
+                f"{getattr(row, 'mean_parse_failures', 0.0):.3f} | "
                 f"{row.mean_latency_ms:.3f} | "
                 f"{row.mean_compute_units:.1f} | "
                 f"{row.estimated_api_cost_usd:.4f} |"

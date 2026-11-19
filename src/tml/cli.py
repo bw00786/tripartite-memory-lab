@@ -9,6 +9,7 @@ import yaml
 
 from tml.agent_experiment import run_agent_experiment
 from tml.experiment import RESULT_COLUMNS, run_experiment
+from tml.local_model_experiment import run_local_agent_experiment
 from tml.plots import (
     plot_agent_results,
     plot_results,
@@ -18,6 +19,8 @@ from tml.plots import (
 
 
 def _run_config(config: dict[str, Any]):
+    if config.get("model", {}).get("backend") == "ollama":
+        return run_local_agent_experiment(config)
     if config.get("experiment", {}).get("type") == "agent_memory":
         return run_agent_experiment(config)
     return run_experiment(config)
@@ -40,6 +43,11 @@ def main() -> None:
     all_parser = subparsers.add_parser("all", help="run every YAML config in configs")
     all_parser.add_argument("--config-dir", type=Path, default=Path("configs"))
     all_parser.add_argument("--output-dir", type=Path, default=Path("results"))
+    all_parser.add_argument(
+        "--include-local-models",
+        action="store_true",
+        help="include Ollama configs (requires the local model server)",
+    )
     args = parser.parse_args()
 
     if args.command == "run":
@@ -77,6 +85,20 @@ def main() -> None:
         config_paths = sorted(args.config_dir.glob("*.yaml"))
         if not config_paths:
             parser.error(f"No YAML configs found in {args.config_dir}")
+        if not args.include_local_models:
+            local_paths = [
+                path
+                for path in config_paths
+                if _read_config(path).get("model", {}).get("backend") == "ollama"
+            ]
+            config_paths = [path for path in config_paths if path not in local_paths]
+            for path in local_paths:
+                print(
+                    f"Skipping local-model config {path}; pass "
+                    "--include-local-models to run it"
+                )
+        if not config_paths:
+            parser.error("No configs selected; use --include-local-models")
         results_by_config = {}
         agent_results_by_config = {}
         args.output_dir.mkdir(parents=True, exist_ok=True)

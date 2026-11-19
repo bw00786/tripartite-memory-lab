@@ -1,0 +1,47 @@
+model:
+  backend: ollama
+  model_name: gemma3:4b
+  base_url: http://localhost:11434
+  seed: 1
+  trials: 3
+  bootstrap_samples: 2000
+  num_ctx: 2048
+  num_predict: 96
+  timeout_seconds: 300
+  agent_policy: prompt_instructions
+  retrieval_policy: model_generated
+  taskset_version: 3
+  distractors: 12
+  delay_turns: 10
+  min_correction_updates: 2
+  max_correction_updates: 5
+  min_distributed_clues: 2
+  max_distributed_clues: 5
+  heldout_lexicon:
+    - amber
+    - anchor
+    - orchard
+    - vessel
+    - cobalt
+    - meadow
+    - ribbon
+    - summit
+    - lantern
+    - marble
+    - harbor
+    - thimble
+    - copper
+    - willow
+    - compass
+    - velvet
+  freshness_limit: 10
+  confidence_threshold: 0.6
+  shared_noise_rate: 0.1
+  shared_access_limit: 8
+  communication_budget: 2
+  api_cost_per_call_usd: 0.0
+experiment:
+  type: agent_memory
+  tasks: [heldout_cue_retrieval]
+  setups: [single_agent, private_memory, shared_memory]
+  team_sizes: [1, 2]

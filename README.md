@@ -52,6 +52,23 @@ python -m tml.cli run configs/agent_memory_heldout.yaml
 python -m tml.cli run configs/sweep_agent_heldout_policy.yaml
 ```
 
+Run the local Ollama pilot with the preinstalled Gemma 3 4B model:
+
+```powershell
+ollama serve
+ollama list
+python -m tml.cli run configs/ollama_heldout_pilot.yaml
+```
+
+The pilot requires `gemma3:4b` to be installed in Ollama and its local API to
+be reachable at `http://localhost:11434`. Model downloads are not automatic.
+The config fixes the model tag, seed, temperature (0), context limit, output
+limit, and task set. Output records the installed model digest, per-condition
+inference calls, prompt/completion tokens, parse failures, and measured
+latency. `api_cost_per_call_usd` is zero for this local run; machine energy and
+hardware costs are not estimated. The small pilot has too few trials for
+general conclusions; increase `trials` in a copied config for a fuller study.
+
 Run its individual communication, access-limit, shared-memory-noise,
 freshness-limit, or confidence-threshold intervention:
 
@@ -70,6 +87,13 @@ summary:
 python -m tml.cli all
 ```
 
+This runs deterministic configs and skips Ollama configs by default. To include
+the local model pilot:
+
+```powershell
+python -m tml.cli all --include-local-models
+```
+
 By default, generated files are written to `results/`, which is git-ignored:
 
 - One CSV per configuration, containing means, 95% bootstrap confidence
@@ -86,14 +110,13 @@ that file.
 
 ## Agent-memory benchmark
 
-The agent-memory benchmark isolates memory and coordination policies without
-calling an LLM. It uses a deterministic simulator, not actual language-model
-agents; open-weight models are therefore not required. Within each memory-setup
-comparison, the retrieval policy and seeded task generator are held fixed.
-There are no prompts or model inference
-calls in this experiment, so prompt/model controls and monetary inference costs
-are not applicable. Results record the backend, policy, task-set version,
-configuration snapshot, and seed.
+The deterministic agent-memory benchmark isolates memory and coordination
+policies without calling an LLM. An optional Ollama backend runs the version-3
+cue task against a local open-weight model. It is a separate, real-model pilot:
+the same model tag, task instances, system instructions, and decoding settings
+are used across memory setups, while the available memory and number of agent
+calls vary by setup. Results record backend, model tag/digest, policy, task-set
+version, configuration snapshot, and seed.
 
 The included agent configurations use task-set version 2. In addition to the
 original tasks, it varies correction-chain length and the number of distributed
