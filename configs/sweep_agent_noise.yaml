@@ -2,6 +2,8 @@ model:
   backend: deterministic_simulator
   agent_policy: highest_version_then_latest_timestamp
   taskset_version: 2
+  retrieval_policy: exact_key
+  heldout_lexicon: []
   seed: 1
   trials: 60
   bootstrap_samples: 2000

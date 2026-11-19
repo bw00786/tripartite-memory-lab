@@ -76,6 +76,7 @@ def test_agent_plot_and_summary_include_task_metrics(tmp_path) -> None:
                 "task": "delayed_retrieval",
                 "setup": setup,
                 "team_size": team_size,
+                "retrieval_policy": "exact_key",
                 "mean_accuracy": accuracy,
                 "accuracy_ci_low": accuracy - 0.05,
                 "accuracy_ci_high": accuracy + 0.05,
@@ -118,6 +119,7 @@ def test_agent_summary_compares_matching_sweep_values(tmp_path) -> None:
                 "task": "uncertainty",
                 "setup": setup,
                 "team_size": 1,
+                "retrieval_policy": "cue_token_overlap",
                 "mean_accuracy": accuracy,
                 "accuracy_ci_low": accuracy,
                 "accuracy_ci_high": accuracy,
@@ -152,4 +154,7 @@ def test_agent_summary_compares_matching_sweep_values(tmp_path) -> None:
         "shared_memory: paired CI above zero in 0/2, below zero in 0/2, "
         "and crossing zero in 2/2"
         in summary_path.read_text(encoding="utf-8")
+    )
+    assert "Paired accuracy delta vs exact-key" in summary_path.read_text(
+        encoding="utf-8"
     )

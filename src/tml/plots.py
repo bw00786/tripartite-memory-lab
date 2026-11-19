@@ -352,13 +352,15 @@ def write_agent_summary(
         "is the configured team size; single_agent always uses one agent.",
         "",
         (
-            "| Config | Task | Setup | Team-size setting | Accuracy (95% CI) | Exact "
+            "| Config | Task | Setup | Retrieval policy | Intervention | "
+            "Team-size setting | Accuracy (95% CI) | Exact "
             "retrieval (95% CI) | Paired accuracy delta vs single-agent (95% CI) | "
+            "Paired accuracy delta vs exact-key (95% CI) | "
             "Stale errors | Conflict errors | "
             "Uncertainty errors | Brier score | "
             "Latency ms | Compute units | API cost USD |"
         ),
-        "|---|---|---|---:|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
+        "|---|---|---|---|---|---:|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for config_name, frame in results_by_config.items():
         if not {"task", "setup", "team_size", "mean_accuracy"}.issubset(
@@ -366,6 +368,12 @@ def write_agent_summary(
         ):
             continue
         for row in frame.itertuples():
+            retrieval_policy = getattr(row, "retrieval_policy", "exact_key")
+            sweep_name = getattr(row, "sweep", "")
+            sweep_value = getattr(row, "sweep_value", "")
+            intervention = (
+                f"{sweep_name}={sweep_value}" if sweep_name else "none"
+            )
             has_paired_delta = {
                 "accuracy_delta_vs_single_agent",
                 "accuracy_delta_vs_single_agent_ci_low",
@@ -378,14 +386,25 @@ def write_agent_summary(
                     f"[{row.accuracy_delta_vs_single_agent_ci_low:.3f}, "
                     f"{row.accuracy_delta_vs_single_agent_ci_high:.3f}]"
                 )
+            policy_delta = "N/A"
+            if hasattr(row, "accuracy_delta_vs_exact_key") and np.isfinite(
+                row.accuracy_delta_vs_exact_key
+            ):
+                policy_delta = (
+                    f"{row.accuracy_delta_vs_exact_key:.3f} "
+                    f"[{row.accuracy_delta_vs_exact_key_ci_low:.3f}, "
+                    f"{row.accuracy_delta_vs_exact_key_ci_high:.3f}]"
+                )
             lines.append(
-                f"| {config_name} | {row.task} | {row.setup} | {row.team_size} | "
+                f"| {config_name} | {row.task} | {row.setup} | "
+                f"{retrieval_policy} | {intervention} | {row.team_size} | "
                 f"{row.mean_accuracy:.3f} "
                 f"[{row.accuracy_ci_low:.3f}, {row.accuracy_ci_high:.3f}] | "
                 f"{row.mean_exact_retrieval:.3f} "
                 f"[{row.exact_retrieval_ci_low:.3f}, "
                 f"{row.exact_retrieval_ci_high:.3f}] | "
                 f"{paired_delta} | "
+                f"{policy_delta} | "
                 f"{row.mean_stale_error_rate:.3f} | "
                 f"{row.mean_conflict_error_rate:.3f} | "
                 f"{row.mean_uncertainty_error_rate:.3f} | "

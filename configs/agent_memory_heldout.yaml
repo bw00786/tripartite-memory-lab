@@ -1,0 +1,47 @@
+model:
+  backend: deterministic_simulator
+  agent_policy: highest_version_then_latest_timestamp
+  taskset_version: 3
+  retrieval_policy: cue_token_overlap
+  seed: 1
+  trials: 150
+  bootstrap_samples: 2000
+  distractors: 12
+  delay_turns: 10
+  min_correction_updates: 2
+  max_correction_updates: 5
+  min_distributed_clues: 2
+  max_distributed_clues: 5
+  heldout_lexicon:
+    - amber
+    - anchor
+    - orchard
+    - vessel
+    - cobalt
+    - meadow
+    - ribbon
+    - summit
+    - lantern
+    - marble
+    - harbor
+    - thimble
+    - copper
+    - willow
+    - compass
+    - velvet
+  freshness_limit: 10
+  confidence_threshold: 0.6
+  shared_noise_rate: 0.1
+  shared_access_limit: 8
+  communication_budget: 3
+  api_cost_per_call_usd: 0.0
+experiment:
+  type: agent_memory
+  tasks: [heldout_cue_retrieval]
+  setups:
+    - single_agent
+    - private_memory
+    - shared_memory
+    - shared_memory_noisy
+    - shared_memory_limited
+  team_sizes: [1, 3, 5]

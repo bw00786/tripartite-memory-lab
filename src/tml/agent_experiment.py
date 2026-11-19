@@ -14,6 +14,7 @@ TASKS = (
     "corrected_fact",
     "correction_chain",
     "distributed_clues",
+    "heldout_cue_retrieval",
     "uncertainty_and_staleness",
 )
 SETUPS = (
@@ -59,6 +60,7 @@ def _make_scenario(
     max_correction_updates: int,
     min_distributed_clues: int,
     max_distributed_clues: int,
+    heldout_lexicon: list[str],
 ) -> tuple[list[dict[str, Any]], list[str], dict[str, str | None], int, set[str]]:
     records: list[dict[str, Any]] = []
     now = delay + 2
@@ -115,6 +117,44 @@ def _make_scenario(
             for index, (key, value) in enumerate(expected.items())
         )
         query_keys = list(expected)
+    elif task == "heldout_cue_retrieval":
+        if taskset_version < 3:
+            raise ValueError(
+                "heldout_cue_retrieval requires taskset_version 3 or newer"
+            )
+        if len(set(heldout_lexicon)) < 8:
+            raise ValueError("heldout_lexicon must contain at least 8 unique terms")
+        selected = rng.choice(heldout_lexicon, size=4, replace=False).tolist()
+        query_terms = selected[:2]
+        query = " ".join(query_terms)
+        expected_value = f"heldout-answer-{trial}"
+        records.append(
+            {
+                **_record(f"opaque-target-{trial}", expected_value, 0),
+                "content": " ".join(selected),
+            }
+        )
+        for index in range(distractors):
+            overlap_term = query_terms[index % len(query_terms)]
+            non_query_terms = [
+                term for term in heldout_lexicon if term not in query_terms
+            ]
+            distractor_terms = rng.choice(
+                non_query_terms, size=3, replace=False
+            ).tolist()
+            records.append(
+                {
+                    **_record(
+                        f"opaque-distractor-{trial}-{index}",
+                        f"distractor-answer-{trial}-{index}",
+                        0,
+                    ),
+                    "content": " ".join([overlap_term, *distractor_terms]),
+                }
+            )
+        now = 1
+        query_keys = [query]
+        expected = {query: expected_value}
     elif task == "uncertainty_and_staleness":
         records.extend(
             [
@@ -127,16 +167,17 @@ def _make_scenario(
     else:
         raise ValueError(f"Unknown agent task: {task}")
 
-    for index in range(distractors):
-        key = f"distractor_{index}"
-        records.append(
-            _record(
-                key,
-                f"distractor-value-{trial}-{index}",
-                int(rng.integers(1, max(now, 2))),
-                confidence=float(rng.uniform(0.7, 1.0)),
+    if task != "heldout_cue_retrieval":
+        for index in range(distractors):
+            key = f"distractor_{index}"
+            records.append(
+                _record(
+                    key,
+                    f"distractor-value-{trial}-{index}",
+                    int(rng.integers(1, max(now, 2))),
+                    confidence=float(rng.uniform(0.7, 1.0)),
+                )
             )
-        )
     rng.shuffle(records)
     return records, query_keys, expected, now, stale_values
 
@@ -159,6 +200,7 @@ def _store_records(
 
 
 def _answer(
+    task: str,
     setup: str,
     memories: list[list[dict[str, Any]]],
     query_keys: list[str],
@@ -167,6 +209,7 @@ def _answer(
     confidence_threshold: float,
     access_limit: int,
     communication_budget: int,
+    retrieval_policy: str,
 ) -> tuple[dict[str, str | None], dict[str, float], int, int]:
     if setup == "shared_memory_limited":
         shared_records = memories[0]
@@ -189,8 +232,38 @@ def _answer(
     candidates: dict[str, list[dict[str, Any]]] = {key: [] for key in query_keys}
     messages = 0
     for group in candidate_groups:
+        if task == "heldout_cue_retrieval" and retrieval_policy == "cue_token_overlap":
+            scored: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+            for query in query_keys:
+                query_terms = set(query.casefold().split())
+                scored[query] = []
+                for record in group:
+                    content_terms = set(
+                        str(record.get("content", "")).casefold().split()
+                    )
+                    score = len(query_terms & content_terms)
+                    if score:
+                        scored[query].append((score, record))
+            matched_by_query: dict[str, list[dict[str, Any]]] = {}
+            for query, scored_records in scored.items():
+                if not scored_records:
+                    matched_by_query[query] = []
+                    continue
+                best_score = max(score for score, _ in scored_records)
+                matched_by_query[query] = [
+                    record
+                    for score, record in scored_records
+                    if score == best_score
+                ]
+        else:
+            matched_by_query = {
+                query: [record for record in group if record["key"] == query]
+                for query in query_keys
+            }
         matched = [
-            record for record in group if record["key"] in candidates
+            record
+            for query in query_keys
+            for record in matched_by_query[query]
         ]
         if setup == "private_memory":
             if not matched:
@@ -198,8 +271,8 @@ def _answer(
             if messages >= communication_budget:
                 continue
             messages += 1
-        for record in matched:
-            candidates[record["key"]].append(record)
+        for query in query_keys:
+            candidates[query].extend(matched_by_query[query])
 
     answers: dict[str, str | None] = {}
     confidences: dict[str, float] = {}
@@ -269,12 +342,16 @@ def _trial_metrics(
     }
 
 
-def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
+def run_agent_experiment(
+    config: Mapping[str, Any], *, _include_trial_samples: bool = False
+) -> pd.DataFrame:
     """Run paired memory-task trials across agent team and memory configurations."""
     model = dict(config.get("model", {}))
     experiment = dict(config.get("experiment", {}))
     intervention = experiment.get("intervention")
     if intervention is not None:
+        seed = int(model["seed"])
+        bootstrap_samples = int(model["bootstrap_samples"])
         parameter_names = {
             "communication_budget": "communication_budget",
             "shared_access_limit": "shared_access_limit",
@@ -282,6 +359,7 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
             "freshness_limit": "freshness_limit",
             "confidence_threshold": "confidence_threshold",
             "team_size": "team_sizes",
+            "retrieval_policy": "retrieval_policy",
         }
         if intervention not in parameter_names:
             raise ValueError(f"Unknown agent intervention: {intervention}")
@@ -296,15 +374,66 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
             setting_experiment.pop("values")
             if intervention == "team_size":
                 setting_experiment["team_sizes"] = [int(value)]
+            elif intervention == "retrieval_policy":
+                setting_model[parameter_names[intervention]] = str(value)
             else:
                 setting_model[parameter_names[intervention]] = value
             frame = run_agent_experiment(
-                {"model": setting_model, "experiment": setting_experiment}
+                {"model": setting_model, "experiment": setting_experiment},
+                _include_trial_samples=intervention == "retrieval_policy",
             )
             frame["sweep"] = intervention
             frame["sweep_value"] = value
             results.append(frame)
-        return pd.concat(results, ignore_index=True)
+        combined = pd.concat(results, ignore_index=True)
+        if intervention == "retrieval_policy":
+            combined["accuracy_delta_vs_exact_key"] = np.nan
+            combined["accuracy_delta_vs_exact_key_ci_low"] = np.nan
+            combined["accuracy_delta_vs_exact_key_ci_high"] = np.nan
+            combined["exact_retrieval_delta_vs_exact_key"] = np.nan
+            combined["exact_retrieval_delta_vs_exact_key_ci_low"] = np.nan
+            combined["exact_retrieval_delta_vs_exact_key_ci_high"] = np.nan
+            reference = combined[combined["sweep_value"] == "exact_key"]
+            for index, row in combined.iterrows():
+                matching_reference = reference[
+                    (reference["task"] == row["task"])
+                    & (reference["setup"] == row["setup"])
+                    & (reference["team_size"] == row["team_size"])
+                ]
+                if matching_reference.empty:
+                    continue
+                reference_row = matching_reference.iloc[0]
+                for metric in ("accuracy", "exact_retrieval"):
+                    differences = np.asarray(row[f"__{metric}_samples"]) - np.asarray(
+                        reference_row[f"__{metric}_samples"]
+                    )
+                    combined.at[index, f"{metric}_delta_vs_exact_key"] = float(
+                        differences.mean()
+                    )
+                    delta_rng = np.random.default_rng(
+                        np.random.SeedSequence(
+                            [
+                                seed,
+                                int(row["team_size"]),
+                                SETUPS.index(row["setup"]),
+                                TASKS.index(row["task"]),
+                                881 if metric == "accuracy" else 882,
+                            ]
+                        )
+                    )
+                    low, high = bootstrap_ci(
+                        differences, delta_rng, n_bootstrap=bootstrap_samples
+                    )
+                    combined.at[
+                        index, f"{metric}_delta_vs_exact_key_ci_low"
+                    ] = low
+                    combined.at[
+                        index, f"{metric}_delta_vs_exact_key_ci_high"
+                    ] = high
+            combined = combined.drop(
+                columns=["__accuracy_samples", "__exact_retrieval_samples"]
+            )
+        return combined
 
     if model.get("backend") != "deterministic_simulator":
         raise ValueError("agent memory experiments require the deterministic_simulator")
@@ -328,10 +457,15 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
     max_correction_updates = int(model["max_correction_updates"])
     min_distributed_clues = int(model["min_distributed_clues"])
     max_distributed_clues = int(model["max_distributed_clues"])
+    retrieval_policy = str(model.get("retrieval_policy", "exact_key"))
+    heldout_lexicon_value = model.get("heldout_lexicon", [])
+    if not isinstance(heldout_lexicon_value, list):
+        raise ValueError("heldout_lexicon must be a list of single-token strings")
+    heldout_lexicon = heldout_lexicon_value
     api_cost_per_call = float(model["api_cost_per_call_usd"])
 
-    if taskset_version not in (1, 2):
-        raise ValueError("taskset_version must be 1 or 2")
+    if taskset_version not in (1, 2, 3):
+        raise ValueError("taskset_version must be 1, 2, or 3")
     if trials < 1 or bootstrap_samples < 1:
         raise ValueError("trials and bootstrap_samples must be positive")
     if not team_sizes or any(size < 1 for size in team_sizes):
@@ -361,6 +495,17 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
         raise ValueError("task-set difficulty bounds are invalid")
     if "correction_chain" in tasks and taskset_version < 2:
         raise ValueError("correction_chain requires taskset_version 2 or newer")
+    if "heldout_cue_retrieval" in tasks and taskset_version < 3:
+        raise ValueError("heldout_cue_retrieval requires taskset_version 3 or newer")
+    if retrieval_policy not in {"exact_key", "cue_token_overlap"}:
+        raise ValueError(f"Unknown retrieval_policy: {retrieval_policy}")
+    if "heldout_cue_retrieval" in tasks and len(set(heldout_lexicon)) < 8:
+        raise ValueError("heldout_lexicon must contain at least 8 unique terms")
+    if any(
+        not isinstance(term, str) or not term or len(term.split()) != 1
+        for term in heldout_lexicon
+    ):
+        raise ValueError("heldout_lexicon terms must be non-empty single-token strings")
 
     raw: dict[tuple[str, str, int], dict[str, list[float]]] = {}
     for task in tasks:
@@ -394,6 +539,7 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
                         max_correction_updates,
                         min_distributed_clues,
                         max_distributed_clues,
+                        heldout_lexicon,
                     )
                     timer = perf_counter()
                     memories = _store_records(
@@ -408,6 +554,7 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
                         ),
                     )
                     answers, confidences, messages, scanned = _answer(
+                        task,
                         setup,
                         memories,
                         query_keys,
@@ -416,6 +563,7 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
                         confidence_threshold,
                         access_limit,
                         communication_budget,
+                        retrieval_policy,
                     )
                     elapsed_ms = (perf_counter() - timer) * 1000
                     metrics = _trial_metrics(
@@ -438,6 +586,7 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
             "team_size": team_size,
             "backend": model["backend"],
             "agent_policy": model["agent_policy"],
+            "retrieval_policy": retrieval_policy,
             "taskset_version": int(model["taskset_version"]),
             "trials": trials,
             "seed": seed,
@@ -468,6 +617,11 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
             )
             row[f"{metric}_ci_low"] = low
             row[f"{metric}_ci_high"] = high
+            if _include_trial_samples and metric in {
+                "accuracy",
+                "exact_retrieval",
+            }:
+                row[f"__{metric}_samples"] = samples.tolist()
         for metric in ("accuracy", "exact_retrieval"):
             delta_name = f"{metric}_delta_vs_single_agent"
             if baseline is None:

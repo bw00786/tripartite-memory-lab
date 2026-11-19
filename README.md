@@ -45,6 +45,13 @@ Run the agent-memory protocol comparison:
 python -m tml.cli run configs/agent_memory.yaml
 ```
 
+Run the held-out lexical-cue task and its exact-key ablation:
+
+```powershell
+python -m tml.cli run configs/agent_memory_heldout.yaml
+python -m tml.cli run configs/sweep_agent_heldout_policy.yaml
+```
+
 Run its individual communication, access-limit, shared-memory-noise,
 freshness-limit, or confidence-threshold intervention:
 
@@ -81,9 +88,9 @@ that file.
 
 The agent-memory benchmark isolates memory and coordination policies without
 calling an LLM. It uses a deterministic simulator, not actual language-model
-agents; open-weight models are therefore not required. The same
-`highest_version_then_latest_timestamp` retrieval policy and seeded task
-generator are used across memory setups. There are no prompts or model inference
+agents; open-weight models are therefore not required. Within each memory-setup
+comparison, the retrieval policy and seeded task generator are held fixed.
+There are no prompts or model inference
 calls in this experiment, so prompt/model controls and monetary inference costs
 are not applicable. Results record the backend, policy, task-set version,
 configuration snapshot, and seed.
@@ -112,18 +119,31 @@ Separate sweep configs vary communication budget, shared-memory access limit,
 shared-write corruption, freshness limit, and confidence threshold while
 keeping the task seed and retrieval policy fixed.
 
+The version-3 held-out cue task stores records under opaque IDs and asks for a
+fact using two content terms rather than the stored ID. The configured
+`cue_token_overlap` policy ranks records by exact token overlap; distractors
+share one query term, while the target contains both. The config supplies the
+lexicon and random seed, and each trial generates a new cue and distractor set.
+The policy sweep compares this simple lexical rule with the exact-key ablation.
+This tests retrieval beyond direct key equality, but it does not test semantic
+understanding: the terms are explicit, the scoring rule is deterministic, and
+the evaluation lexicon is provided to the simulator rather than held out from a
+trained model.
+
 Agent CSVs report task accuracy, exact task retrieval, stale, conflict, and
 uncertainty error rates, uncertainty Brier score, measured wall-clock latency,
 and deterministic compute units (records written + scanned + messages). Each
-metric has a trial-bootstrap 95% confidence interval. CSVs also include paired
-accuracy and exact-retrieval differences versus `single_agent`: both setups
+metric has a trial-bootstrap 95% confidence interval. CSVs also include the
+retrieval policy and intervention value, plus paired accuracy and
+exact-retrieval differences versus `single_agent`: both setups
 are scored on the same seeded scenario for each trial, then the trial-level
 differences are bootstrapped. The summary distinguishes intervals above zero,
 below zero, or crossing zero; these intervals are not adjusted for multiple
-comparisons. `estimated_api_cost_usd` is zero because this simulator makes no
-external model calls; it is not an estimate of local electricity or hardware
-costs. Wall-clock latency depends on the machine and is not expected to match
-across runs.
+comparisons. The held-out-policy sweep additionally reports paired differences
+versus the exact-key policy on the same scenarios. `estimated_api_cost_usd` is
+zero because this simulator makes no external model calls; it is not an
+estimate of local electricity or hardware costs. Wall-clock latency depends on
+the machine and is not expected to match across runs.
 
 In the default seed-1, 150-trial run, single-agent and shared-memory setups
 reached 1.000 accuracy on all five tasks at each configured team-size setting.
@@ -143,6 +163,15 @@ deterministic symbolic simulator whose policy reads explicit keys and metadata,
 not measurements of deployed agents, language understanding, or general
 reasoning. The generated summary includes confidence intervals and outcomes
 for every intervention.
+
+On the separate version-3 cue task (150 trials, three-agent setting), exact-key
+retrieval scored 0.000, while token overlap scored 1.000 for single-agent and
+shared-memory setups; the paired difference from exact-key was 1.000 (95% CI
+1.000 to 1.000). Noisy shared memory scored 0.927 with a paired difference of
+0.927 (95% CI 0.880 to 0.960). Private memory scored 0.367 and access-limited
+shared memory 0.613. These deliberately controlled outcomes confirm the
+lexical matching implementation on this synthetic task, not broad retrieval
+generalization or semantic understanding.
 
 ## Model and experiment details
 

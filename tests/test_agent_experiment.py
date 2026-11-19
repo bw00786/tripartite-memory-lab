@@ -13,12 +13,16 @@ def _config(
     noise_rate: float = 0.0,
     access_limit: int = 8,
     taskset_version: int = 1,
+    retrieval_policy: str = "exact_key",
+    heldout_lexicon: list[str] | None = None,
 ) -> dict:
     return {
         "model": {
             "backend": "deterministic_simulator",
             "agent_policy": "highest_version_then_latest_timestamp",
             "taskset_version": taskset_version,
+            "retrieval_policy": retrieval_policy,
+            "heldout_lexicon": heldout_lexicon or [],
             "seed": 12,
             "trials": trials,
             "bootstrap_samples": 200,
@@ -251,3 +255,102 @@ def test_taskset_v2_varies_correction_depth_and_clue_count_reproducibly() -> Non
     communication_results = run_agent_experiment(communication_config)
     assert communication_results["mean_accuracy"].iloc[0] < 1.0
     assert communication_results["mean_accuracy"].iloc[1] == 1.0
+
+
+def test_heldout_cue_retrieval_uses_text_not_an_explicit_record_key() -> None:
+    lexicon = [
+        "amber",
+        "anchor",
+        "orchard",
+        "vessel",
+        "cobalt",
+        "meadow",
+        "ribbon",
+        "summit",
+        "lantern",
+        "marble",
+        "harbor",
+        "thimble",
+    ]
+    config = _config(
+        ["heldout_cue_retrieval"],
+        ["single_agent", "shared_memory"],
+        team_sizes=[3],
+        trials=40,
+        taskset_version=3,
+        retrieval_policy="cue_token_overlap",
+        heldout_lexicon=lexicon,
+    )
+
+    first = run_agent_experiment(config)
+    second = run_agent_experiment(config)
+
+    np.testing.assert_array_equal(
+        first[["mean_accuracy", "accuracy_delta_vs_single_agent"]].to_numpy(),
+        second[["mean_accuracy", "accuracy_delta_vs_single_agent"]].to_numpy(),
+    )
+    assert (first["mean_accuracy"] == 1.0).all()
+
+    config["model"]["retrieval_policy"] = "exact_key"
+    exact_key_results = run_agent_experiment(config)
+    assert (exact_key_results["mean_accuracy"] == 0.0).all()
+
+
+def test_heldout_cue_policy_ablation_runs_as_a_retrieval_intervention() -> None:
+    config = _config(
+        ["heldout_cue_retrieval"],
+        ["single_agent"],
+        team_sizes=[1],
+        trials=20,
+        taskset_version=3,
+        retrieval_policy="cue_token_overlap",
+        heldout_lexicon=[
+            "amber",
+            "anchor",
+            "orchard",
+            "vessel",
+            "cobalt",
+            "meadow",
+            "ribbon",
+            "summit",
+        ],
+    )
+    config["experiment"].update(
+        {
+            "intervention": "retrieval_policy",
+            "values": ["exact_key", "cue_token_overlap"],
+        }
+    )
+
+    results = run_agent_experiment(config)
+
+    assert results["sweep_value"].tolist() == ["exact_key", "cue_token_overlap"]
+    assert results["mean_accuracy"].tolist() == [0.0, 1.0]
+    assert results["accuracy_delta_vs_exact_key"].tolist() == [0.0, 1.0]
+    assert results["accuracy_delta_vs_exact_key_ci_low"].tolist() == [0.0, 1.0]
+    assert results["accuracy_delta_vs_exact_key_ci_high"].tolist() == [0.0, 1.0]
+
+
+def test_cue_token_policy_keeps_structured_tasks_on_exact_keys() -> None:
+    config = _config(
+        ["delayed_retrieval", "heldout_cue_retrieval"],
+        ["single_agent"],
+        team_sizes=[1],
+        trials=12,
+        taskset_version=3,
+        retrieval_policy="cue_token_overlap",
+        heldout_lexicon=[
+            "amber",
+            "anchor",
+            "orchard",
+            "vessel",
+            "cobalt",
+            "meadow",
+            "ribbon",
+            "summit",
+        ],
+    )
+
+    results = run_agent_experiment(config)
+
+    assert (results["mean_accuracy"] == 1.0).all()
