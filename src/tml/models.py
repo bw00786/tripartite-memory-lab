@@ -78,3 +78,55 @@ class NeuronOnlyModel(Model):
         for _ in range(self.iters):
             state = _top_k(_normalized(self.weights @ state), self.K)
         return state
+
+
+class MatrixModel(NeuronOnlyModel):
+    """Associative-memory baseline augmented with a blurred chemical imprint."""
+
+    def __init__(
+        self,
+        N: int = 200,
+        K: int = 20,
+        D: int = 16,
+        noise: float = 0.0,
+        alpha: float = 1.0,
+        iters: int = 3,
+        seed: int = 1,
+    ) -> None:
+        super().__init__(N, K, iters)
+        if D < 1 or noise < 0:
+            raise ValueError("D must be positive and noise must be non-negative")
+        self.D = D
+        self.noise = noise
+        self.alpha = alpha
+        self.seed = seed
+        self.imprint: np.ndarray | None = None
+
+    def store(self, P: np.ndarray, S: np.ndarray | None = None) -> None:
+        super().store(P)
+        if S is None:
+            raise ValueError("MatrixModel requires chemical signatures S")
+        signatures = np.asarray(S)
+        if signatures.shape != (P.shape[0], self.D):
+            raise ValueError(f"S must have shape ({P.shape[0]}, {self.D})")
+        if not np.all((signatures == -1) | (signatures == 1)):
+            raise ValueError("S must contain only -1 and +1")
+
+        self.imprint = np.asarray(P, dtype=float).T @ signatures
+        blur_scale = self.noise * np.sqrt(P.shape[0] * self.K / self.N)
+        if blur_scale:
+            self.imprint += np.random.default_rng(self.seed).normal(
+                0.0, blur_scale, size=self.imprint.shape
+            )
+
+    def recall(self, cue: np.ndarray, rng: Generator) -> np.ndarray:
+        del rng
+        state = self._validate_cue(cue)
+        if self.weights is None or self.imprint is None:
+            raise RuntimeError("store must be called before recall")
+        for _ in range(self.iters):
+            h_synaptic = _normalized(self.weights @ state)
+            chemical_state = self.imprint[state.astype(bool)].sum(axis=0)
+            h_chemical = _normalized(self.imprint @ chemical_state)
+            state = _top_k(h_synaptic + self.alpha * h_chemical, self.K)
+        return state

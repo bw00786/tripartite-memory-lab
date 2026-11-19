@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from tml.models import NeuronOnlyModel
-from tml.patterns import make_patterns
+from tml.models import MatrixModel, NeuronOnlyModel
+from tml.patterns import make_patterns, make_signatures
 
 
 def test_neuron_only_recall_meets_low_load_acceptance() -> None:
@@ -31,3 +31,31 @@ def test_neuron_only_checks_input_and_storage() -> None:
         model.recall(np.zeros(10), np.random.default_rng(0))
     with pytest.raises(ValueError, match="exactly K"):
         model.store(np.zeros((2, 10)))
+
+
+def test_matrix_model_is_deterministic_and_uses_expected_shapes() -> None:
+    data_rng = np.random.default_rng(42)
+    patterns = make_patterns(40, 5, 6, data_rng)
+    signatures = make_signatures(6, 8, data_rng)
+    first = MatrixModel(N=40, K=5, D=8, noise=0.5, seed=13)
+    second = MatrixModel(N=40, K=5, D=8, noise=0.5, seed=13)
+    first.store(patterns, signatures)
+    second.store(patterns, signatures)
+
+    assert first.imprint is not None
+    assert first.imprint.shape == (40, 8)
+    np.testing.assert_array_equal(first.imprint, second.imprint)
+
+    cue = np.zeros(40, dtype=np.int8)
+    cue[np.flatnonzero(patterns[0])[:2]] = 1
+    np.testing.assert_array_equal(
+        first.recall(cue, np.random.default_rng(5)),
+        second.recall(cue, np.random.default_rng(6)),
+    )
+
+
+def test_matrix_model_requires_matching_signatures() -> None:
+    model = MatrixModel(N=10, K=3, D=4)
+    patterns = make_patterns(10, 3, 2, np.random.default_rng(0))
+    with pytest.raises(ValueError, match="shape"):
+        model.store(patterns, np.ones((2, 3)))
