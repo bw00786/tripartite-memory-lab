@@ -1,11 +1,11 @@
 # Tripartite Memory Lab
 
-Tripartite Memory Lab is a reproducible experiment harness for comparing
-associative recall from a neuron-only memory model with recall from models that
-add a chemical-matrix channel. It explores the functional consequences of the
-hypothesis described by Marx & Gilon (2026, *International Journal of Psychiatry
-Research*, DOI [10.33425/2641-4317.1251](https://doi.org/10.33425/2641-4317.1251)):
-recall, interference, and robustness to chemical noise.
+Tripartite Memory Lab is a reproducible harness for functional memory
+experiments. It includes a neuron-only associative memory, chemical-matrix
+variants, and a deterministic simulation of agent-team memory protocols. The
+original chemical-memory experiments relate to the hypothesis described by Marx
+& Gilon (2026, *International Journal of Psychiatry Research*, DOI
+[10.33425/2641-4317.1251](https://doi.org/10.33425/2641-4317.1251)).
 
 These experiments test recall behavior of a modeled mechanism; they do not bear on whether any system is conscious.
 
@@ -39,6 +39,23 @@ python -m tml.cli run configs/sweep_diffusion.yaml
 python -m tml.cli run configs/sweep_sparse.yaml
 ```
 
+Run the agent-memory protocol comparison:
+
+```powershell
+python -m tml.cli run configs/agent_memory.yaml
+```
+
+Run its individual communication, access-limit, shared-memory-noise,
+freshness-limit, or confidence-threshold intervention:
+
+```powershell
+python -m tml.cli run configs/sweep_agent_communication.yaml
+python -m tml.cli run configs/sweep_agent_access.yaml
+python -m tml.cli run configs/sweep_agent_noise.yaml
+python -m tml.cli run configs/sweep_agent_freshness.yaml
+python -m tml.cli run configs/sweep_agent_confidence.yaml
+```
+
 Run every YAML configuration and regenerate the CSVs, plots, and comparison
 summary:
 
@@ -49,14 +66,65 @@ python -m tml.cli all
 By default, generated files are written to `results/`, which is git-ignored:
 
 - One CSV per configuration, containing means, 95% bootstrap confidence
-  intervals, interference estimates, trial counts, and seeds.
-- One PNG per sweep, with confidence bands and a dashed neuron-only reference.
-- `summary.md`, which lists variants that did not beat the neuron-only model as
-  well as any conditions where a variant's mean was higher.
+  intervals, task metrics, trial counts, and seeds.
+- One PNG per sweep, with confidence bands; associative-memory plots include a
+  dashed neuron-only reference, while agent-memory plots compare memory setups.
+- Configuration snapshots copied beside each CSV for exact run provenance.
+- `summary.md` for the associative-memory experiments and
+  `agent_memory_summary.md` for agent-memory results.
 
 `python -m tml.cli run configs/sweep_noise.yaml --output custom/path.csv` writes
 the selected CSV to another location; its plot and summary are written alongside
 that file.
+
+## Agent-memory benchmark
+
+The agent-memory benchmark isolates memory and coordination policies without
+calling an LLM. It uses a deterministic simulator, not actual language-model
+agents; open-weight models are therefore not required. The same
+`highest_version_then_latest_timestamp` retrieval policy and seeded task
+generator are used across memory setups. There are no prompts or model inference
+calls in this experiment, so prompt/model controls and monetary inference costs
+are not applicable. Results record the backend, policy, task-set version,
+configuration snapshot, and seed.
+
+The benchmark compares:
+
+- **Single agent:** one agent stores all records.
+- **Private memory:** records are distributed among agents; a coordinator can
+  request relevant records subject to a communication-message budget.
+- **Shared memory:** all agents access a common store.
+- **Noisy shared memory:** a configured fraction of writes is corrupted.
+- **Access-limited shared memory:** queries can inspect only the most recent
+  configured number of records.
+
+Tasks cover delayed fact retrieval, corrected/conflicting facts, combining
+clues distributed across private agents, and abstaining on expired or
+low-confidence facts. Team sizes are configured in `agent_memory.yaml`.
+Separate sweep configs vary communication budget, shared-memory access limit,
+shared-write corruption, freshness limit, and confidence threshold while
+keeping the task seed and retrieval policy fixed.
+
+Agent CSVs report task accuracy, exact task retrieval, stale, conflict, and
+uncertainty error rates, uncertainty Brier score, measured wall-clock latency,
+and deterministic compute units (records written + scanned + messages). Each
+metric has a trial-bootstrap 95% confidence interval. `estimated_api_cost_usd` is zero
+because this simulator makes no external model calls; it is not an estimate of
+local electricity or hardware costs. Wall-clock latency depends on the machine
+and is not expected to match across runs.
+
+In the default seed-1, 150-trial run with three-agent settings, single-agent,
+private-memory, and shared-memory setups reached 1.000 accuracy on all four
+tasks. Noisy shared memory fell to 0.887 on delayed retrieval, 0.933 on
+corrected facts, and 0.904 on distributed clues; access-limited shared memory
+scored 0.000, 0.640, and 0.522 on those tasks respectively. All setups scored
+1.000 on the configured uncertainty/staleness task. In the threshold sweeps,
+raising the freshness limit from 10 to 20 caused expired facts to be returned
+(accuracy 0.5, stale-error rate 0.5), while a confidence threshold of 0.3
+caused low-confidence facts to be returned (accuracy 0.5, uncertainty-error
+rate 0.5). These are deterministic simulator outcomes, not measured behavior
+of deployed agents; the generated summary includes confidence intervals and
+the results for every intervention setting.
 
 ## Model and experiment details
 
@@ -174,7 +242,9 @@ CSV, plots, and summary.
 These are functional simulations, not biological measurements. Neurons,
 signatures, local imprints, diffusion, and domain activation are simplified
 mathematical assumptions; they do not establish that the modeled processes
-occur in a brain. The experiments evaluate recall and interference only.
+occur in a brain. The agent-memory benchmark evaluates task performance of
+fixed memory policies, not the behavior of deployed AI agents. Neither
+experiment evaluates consciousness.
 
 The cited authors state they have not shown that AI cannot be conscious. This
 project does not make or test claims about consciousness.

@@ -1,0 +1,183 @@
+import numpy as np
+
+from tml.agent_experiment import run_agent_experiment
+
+
+def _config(
+    tasks: list[str],
+    setups: list[str],
+    *,
+    team_sizes: list[int] | None = None,
+    trials: int = 20,
+    communication_budget: int = 3,
+    noise_rate: float = 0.0,
+    access_limit: int = 8,
+) -> dict:
+    return {
+        "model": {
+            "backend": "deterministic_simulator",
+            "agent_policy": "highest_version_then_latest_timestamp",
+            "taskset_version": 1,
+            "seed": 12,
+            "trials": trials,
+            "bootstrap_samples": 200,
+            "distractors": 12,
+            "delay_turns": 10,
+            "freshness_limit": 10,
+            "confidence_threshold": 0.6,
+            "shared_noise_rate": noise_rate,
+            "shared_access_limit": access_limit,
+            "communication_budget": communication_budget,
+            "api_cost_per_call_usd": 0.0,
+        },
+        "experiment": {
+            "type": "agent_memory",
+            "tasks": tasks,
+            "setups": setups,
+            "team_sizes": team_sizes or [3],
+        },
+    }
+
+
+def test_agent_memory_results_are_seeded_and_include_cost_metrics() -> None:
+    config = _config(["delayed_retrieval"], ["single_agent", "shared_memory"])
+
+    first = run_agent_experiment(config)
+    second = run_agent_experiment(config)
+
+    numeric = first.select_dtypes("number").columns
+    numeric = numeric[
+        ~numeric.str.contains("latency_ms")
+    ]
+    np.testing.assert_array_equal(first[numeric], second[numeric])
+    assert (first["mean_accuracy"] == 1.0).all()
+    assert (first["external_model_calls"] == 0).all()
+    assert (first["estimated_api_cost_usd"] == 0.0).all()
+    assert (first["mean_latency_ms"] > 0).all()
+
+
+def test_private_memory_team_requires_communication_to_combine_clues() -> None:
+    config = _config(
+        ["distributed_clues"],
+        ["private_memory"],
+        communication_budget=1,
+        trials=50,
+    )
+
+    results = run_agent_experiment(config).iloc[0]
+
+    assert results["mean_accuracy"] < 1.0
+    assert results["mean_agent_messages"] <= 1.0
+
+
+def test_shared_limited_memory_can_lose_delayed_facts() -> None:
+    config = _config(
+        ["delayed_retrieval"],
+        ["shared_memory", "shared_memory_limited"],
+        team_sizes=[3],
+        access_limit=1,
+        trials=40,
+    )
+
+    results = run_agent_experiment(config).set_index("setup")
+
+    assert results.loc["shared_memory", "mean_accuracy"] == 1.0
+    assert results.loc["shared_memory_limited", "mean_accuracy"] < 1.0
+
+
+def test_corrected_facts_and_uncertainty_are_handled_explicitly() -> None:
+    config = _config(
+        ["corrected_fact", "uncertainty_and_staleness"],
+        ["single_agent", "shared_memory"],
+        trials=10,
+    )
+
+    results = run_agent_experiment(config)
+
+    assert (results["mean_accuracy"] == 1.0).all()
+    assert (results["mean_stale_error_rate"] == 0.0).all()
+    assert (results["mean_conflict_error_rate"] == 0.0).all()
+    assert (results["mean_uncertainty_brier"] < 0.01).all()
+
+
+def test_noisy_shared_memory_records_a_failure_when_all_writes_are_corrupted() -> None:
+    config = _config(
+        ["delayed_retrieval"],
+        ["shared_memory", "shared_memory_noisy"],
+        noise_rate=1.0,
+        trials=8,
+    )
+
+    results = run_agent_experiment(config).set_index("setup")
+
+    assert results.loc["shared_memory", "mean_accuracy"] == 1.0
+    assert results.loc["shared_memory_noisy", "mean_accuracy"] == 0.0
+
+
+def test_communication_intervention_changes_private_clue_retrieval() -> None:
+    config = _config(
+        ["distributed_clues"],
+        ["private_memory"],
+        communication_budget=3,
+        trials=30,
+    )
+    config["experiment"]["intervention"] = "communication_budget"
+    config["experiment"]["values"] = [0, 3]
+
+    results = run_agent_experiment(config)
+
+    assert results["sweep_value"].tolist() == [0, 3]
+    assert results["mean_accuracy"].iloc[0] == 0.0
+    assert results["mean_accuracy"].iloc[1] == 1.0
+
+
+def test_noise_and_access_sweeps_preserve_condition_labels() -> None:
+    noise_config = _config(
+        ["delayed_retrieval"],
+        ["shared_memory_noisy"],
+        noise_rate=0.0,
+        trials=12,
+    )
+    noise_config["experiment"].update(
+        {"intervention": "shared_noise_rate", "values": [0.0, 1.0]}
+    )
+    noise_results = run_agent_experiment(noise_config)
+    assert noise_results["mean_accuracy"].tolist() == [1.0, 0.0]
+
+    access_config = _config(
+        ["delayed_retrieval"],
+        ["shared_memory_limited"],
+        access_limit=1,
+        trials=20,
+    )
+    access_config["experiment"].update(
+        {"intervention": "shared_access_limit", "values": [1, 32]}
+    )
+    access_results = run_agent_experiment(access_config)
+    assert access_results["mean_accuracy"].iloc[0] < 1.0
+    assert access_results["mean_accuracy"].iloc[1] == 1.0
+
+
+def test_freshness_and_confidence_interventions_expose_ablation_errors() -> None:
+    config = _config(
+        ["uncertainty_and_staleness"],
+        ["single_agent"],
+        team_sizes=[1],
+        trials=12,
+    )
+    config["experiment"].update(
+        {"intervention": "freshness_limit", "values": [3, 20]}
+    )
+
+    freshness_results = run_agent_experiment(config)
+
+    assert freshness_results["mean_stale_error_rate"].tolist() == [0.0, 0.5]
+    assert freshness_results["mean_accuracy"].tolist() == [1.0, 0.5]
+
+    config["experiment"].update(
+        {"intervention": "confidence_threshold", "values": [0.3, 0.6]}
+    )
+    confidence_results = run_agent_experiment(config)
+
+    assert confidence_results["mean_uncertainty_error_rate"].tolist() == [0.5, 0.0]
+    assert confidence_results["mean_accuracy"].tolist() == [0.5, 1.0]

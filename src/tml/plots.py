@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")
 
@@ -64,6 +65,108 @@ def plot_results(results: pd.DataFrame, output_path: Path) -> None:
     )
     axis.grid(alpha=0.25)
     axis.legend()
+    fig.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+
+
+def plot_agent_results(results: pd.DataFrame, output_path: Path) -> None:
+    """Plot task accuracy by memory setup and team size."""
+    required = {
+        "task",
+        "setup",
+        "team_size",
+        "mean_accuracy",
+        "accuracy_ci_low",
+        "accuracy_ci_high",
+    }
+    if not required.issubset(results.columns):
+        raise ValueError(f"Agent results must include: {', '.join(sorted(required))}")
+    tasks = list(results["task"].drop_duplicates())
+    if "sweep" in results and "sweep_value" in results:
+        sweep_names = results["sweep"].unique()
+        if len(sweep_names) != 1:
+            raise ValueError("Agent plot data must contain one intervention at a time")
+        fig, axes = plt.subplots(
+            1, len(tasks), figsize=(5 * len(tasks), 5), squeeze=False, sharey=True
+        )
+        for axis, task in zip(axes[0], tasks, strict=True):
+            task_rows = results[results["task"] == task]
+            for (setup, team_size), group in task_rows.groupby(
+                ["setup", "team_size"], sort=False
+            ):
+                group = group.sort_values("sweep_value")
+                means = group["mean_accuracy"].to_numpy(dtype=float)
+                axis.errorbar(
+                    group["sweep_value"],
+                    means,
+                    yerr=[
+                        means - group["accuracy_ci_low"].to_numpy(dtype=float),
+                        group["accuracy_ci_high"].to_numpy(dtype=float) - means,
+                    ],
+                    marker="o",
+                    capsize=2,
+                    label=f"{setup}, {team_size} agents",
+                )
+            axis.set_title(task.replace("_", " "))
+            axis.set_ylim(0, 1.05)
+            axis.grid(alpha=0.25)
+        axes[0, 0].set_ylabel("Task accuracy (95% bootstrap CI)")
+        axes[0, len(tasks) // 2].set_xlabel(str(sweep_names[0]).replace("_", " "))
+        axes[0, -1].legend(fontsize="small")
+        fig.tight_layout()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=160)
+        plt.close(fig)
+        return
+
+    fig, axes = plt.subplots(
+        1, len(tasks), figsize=(5 * len(tasks), 5), squeeze=False, sharey=True
+    )
+    setups = list(results["setup"].drop_duplicates())
+    team_sizes = sorted(results["team_size"].unique())
+    positions = np.arange(len(setups), dtype=float)
+    width = 0.8 / len(team_sizes)
+    for axis, task in zip(axes[0], tasks, strict=True):
+        task_rows = results[results["task"] == task]
+        for size_index, team_size in enumerate(team_sizes):
+            means = []
+            lower = []
+            upper = []
+            for setup in setups:
+                row = task_rows[
+                    (task_rows["setup"] == setup)
+                    & (task_rows["team_size"] == team_size)
+                ]
+                if row.empty:
+                    means.append(np.nan)
+                    lower.append(0.0)
+                    upper.append(0.0)
+                    continue
+                result = row.iloc[0]
+                means.append(float(result["mean_accuracy"]))
+                lower.append(
+                    float(result["mean_accuracy"] - result["accuracy_ci_low"])
+                )
+                upper.append(
+                    float(result["accuracy_ci_high"] - result["mean_accuracy"])
+                )
+            offset = (size_index - (len(team_sizes) - 1) / 2) * width
+            axis.bar(
+                positions + offset,
+                means,
+                width,
+                yerr=np.asarray([lower, upper]),
+                capsize=2,
+                label=f"{team_size} agents",
+            )
+        axis.set_xticks(positions, setups, rotation=45, ha="right")
+        axis.set_title(task.replace("_", " "))
+        axis.set_ylim(0, 1.05)
+        axis.grid(axis="y", alpha=0.25)
+    axes[0, 0].set_ylabel("Task accuracy (95% bootstrap CI)")
+    axes[0, -1].legend()
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=160)
@@ -233,3 +336,97 @@ def write_summary(
     """Write a Markdown comparison summary from completed experiment CSVs."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(create_summary(results_by_config), encoding="utf-8")
+
+
+def write_agent_summary(
+    results_by_config: dict[str, pd.DataFrame], output_path: Path
+) -> None:
+    """Write functional agent-memory outcomes without consciousness claims."""
+    lines = [
+        "# Agent memory experiment summary",
+        "",
+        "These results measure a deterministic memory-policy simulation, not "
+        "language-model agents. Latency is local wall-clock time; API cost is "
+        "zero because no external model is called. Compute units count stored "
+        "records, scanned records, and inter-agent messages. Team-size setting "
+        "is the configured team size; single_agent always uses one agent.",
+        "",
+        (
+            "| Config | Task | Setup | Team-size setting | Accuracy (95% CI) | Exact "
+            "retrieval (95% CI) | Stale errors | Conflict errors | "
+            "Uncertainty errors | Brier score | "
+            "Latency ms | Compute units | API cost USD |"
+        ),
+        "|---|---|---|---:|---|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    for config_name, frame in results_by_config.items():
+        if not {"task", "setup", "team_size", "mean_accuracy"}.issubset(
+            frame.columns
+        ):
+            continue
+        for row in frame.itertuples():
+            lines.append(
+                f"| {config_name} | {row.task} | {row.setup} | {row.team_size} | "
+                f"{row.mean_accuracy:.3f} "
+                f"[{row.accuracy_ci_low:.3f}, {row.accuracy_ci_high:.3f}] | "
+                f"{row.mean_exact_retrieval:.3f} "
+                f"[{row.exact_retrieval_ci_low:.3f}, "
+                f"{row.exact_retrieval_ci_high:.3f}] | "
+                f"{row.mean_stale_error_rate:.3f} | "
+                f"{row.mean_conflict_error_rate:.3f} | "
+                f"{row.mean_uncertainty_error_rate:.3f} | "
+                f"{row.mean_uncertainty_brier:.3f} | "
+                f"{row.mean_latency_ms:.3f} | "
+                f"{row.mean_compute_units:.1f} | "
+                f"{row.estimated_api_cost_usd:.4f} |"
+            )
+    lines.extend(
+        [
+            "",
+            "Accuracy comparison with the single-agent setup (counts compare "
+            "observed means only; confidence intervals are per-condition, not "
+            "paired tests):",
+        ]
+    )
+    for config_name, frame in results_by_config.items():
+        if not {"task", "setup", "team_size", "mean_accuracy"}.issubset(
+            frame.columns
+        ):
+            continue
+        comparisons: dict[str, list[str]] = {}
+        group_columns = ["task", "team_size"]
+        if {"sweep", "sweep_value"}.issubset(frame.columns):
+            group_columns.extend(["sweep", "sweep_value"])
+        for _, group in frame.groupby(group_columns, dropna=False):
+            baseline = group.loc[group["setup"] == "single_agent", "mean_accuracy"]
+            if baseline.empty:
+                continue
+            baseline_mean = float(baseline.iloc[0])
+            for row in group.itertuples():
+                if row.setup == "single_agent":
+                    continue
+                outcome = (
+                    "higher"
+                    if row.mean_accuracy > baseline_mean + 1e-12
+                    else "lower"
+                    if row.mean_accuracy < baseline_mean - 1e-12
+                    else "equal"
+                )
+                comparisons.setdefault(row.setup, []).append(outcome)
+        if not comparisons:
+            continue
+        lines.append(f"- **{config_name}**:")
+        for setup, outcomes in sorted(comparisons.items()):
+            counts = {
+                outcome: outcomes.count(outcome)
+                for outcome in ("higher", "equal", "lower")
+            }
+            lines.append(
+                f"  - {setup}: higher in {counts['higher']}/{len(outcomes)}, "
+                f"equal in {counts['equal']}/{len(outcomes)}, "
+                f"lower in {counts['lower']}/{len(outcomes)} task/team-size "
+                "comparisons."
+            )
+    lines.append("")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines), encoding="utf-8")
