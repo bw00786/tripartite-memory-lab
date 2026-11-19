@@ -1,12 +1,16 @@
 model:
   backend: deterministic_simulator
   agent_policy: highest_version_then_latest_timestamp
-  taskset_version: 1
+  taskset_version: 2
   seed: 1
   trials: 60
   bootstrap_samples: 2000
   distractors: 12
   delay_turns: 10
+  min_correction_updates: 2
+  max_correction_updates: 5
+  min_distributed_clues: 2
+  max_distributed_clues: 5
   freshness_limit: 10
   confidence_threshold: 0.6
   shared_noise_rate: 0.1

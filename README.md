@@ -88,6 +88,12 @@ calls in this experiment, so prompt/model controls and monetary inference costs
 are not applicable. Results record the backend, policy, task-set version,
 configuration snapshot, and seed.
 
+The included agent configurations use task-set version 2. In addition to the
+original tasks, it varies correction-chain length and the number of distributed
+clues per seeded trial. The minimum and maximum update/clue counts are explicit
+configuration values. Task-set version 1 remains available for reproducing the
+earlier fixed-size scenarios; `correction_chain` requires version 2.
+
 The benchmark compares:
 
 - **Single agent:** one agent stores all records.
@@ -98,9 +104,10 @@ The benchmark compares:
 - **Access-limited shared memory:** queries can inspect only the most recent
   configured number of records.
 
-Tasks cover delayed fact retrieval, corrected/conflicting facts, combining
-clues distributed across private agents, and abstaining on expired or
-low-confidence facts. Team sizes are configured in `agent_memory.yaml`.
+Tasks cover delayed fact retrieval, corrected/conflicting facts, multi-step
+correction chains, combining clues distributed across private agents, and
+abstaining on expired or low-confidence facts. Team sizes are configured in
+`agent_memory.yaml`.
 Separate sweep configs vary communication budget, shared-memory access limit,
 shared-write corruption, freshness limit, and confidence threshold while
 keeping the task seed and retrieval policy fixed.
@@ -108,23 +115,34 @@ keeping the task seed and retrieval policy fixed.
 Agent CSVs report task accuracy, exact task retrieval, stale, conflict, and
 uncertainty error rates, uncertainty Brier score, measured wall-clock latency,
 and deterministic compute units (records written + scanned + messages). Each
-metric has a trial-bootstrap 95% confidence interval. `estimated_api_cost_usd` is zero
-because this simulator makes no external model calls; it is not an estimate of
-local electricity or hardware costs. Wall-clock latency depends on the machine
-and is not expected to match across runs.
+metric has a trial-bootstrap 95% confidence interval. CSVs also include paired
+accuracy and exact-retrieval differences versus `single_agent`: both setups
+are scored on the same seeded scenario for each trial, then the trial-level
+differences are bootstrapped. The summary distinguishes intervals above zero,
+below zero, or crossing zero; these intervals are not adjusted for multiple
+comparisons. `estimated_api_cost_usd` is zero because this simulator makes no
+external model calls; it is not an estimate of local electricity or hardware
+costs. Wall-clock latency depends on the machine and is not expected to match
+across runs.
 
-In the default seed-1, 150-trial run with three-agent settings, single-agent,
-private-memory, and shared-memory setups reached 1.000 accuracy on all four
-tasks. Noisy shared memory fell to 0.887 on delayed retrieval, 0.933 on
-corrected facts, and 0.904 on distributed clues; access-limited shared memory
-scored 0.000, 0.640, and 0.522 on those tasks respectively. All setups scored
-1.000 on the configured uncertainty/staleness task. In the threshold sweeps,
-raising the freshness limit from 10 to 20 caused expired facts to be returned
-(accuracy 0.5, stale-error rate 0.5), while a confidence threshold of 0.3
-caused low-confidence facts to be returned (accuracy 0.5, uncertainty-error
-rate 0.5). These are deterministic simulator outcomes, not measured behavior
-of deployed agents; the generated summary includes confidence intervals and
-the results for every intervention setting.
+In the default seed-1, 150-trial run, single-agent and shared-memory setups
+reached 1.000 accuracy on all five tasks at each configured team-size setting.
+Private memory matched that except for five-agent distributed clues (0.943;
+paired difference -0.057, 95% CI -0.075 to -0.040), where the communication
+budget could not reach every agent holding clues. At the three-agent setting,
+noisy shared memory scored 0.927 on correction chains and 0.902 on distributed
+clues. Their paired accuracy differences from single-agent were -0.073 (95% CI
+-0.120 to -0.033) and -0.098 (95% CI -0.125 to -0.072), respectively.
+Access-limited shared memory scored 0.887 on correction chains and 0.534 on
+distributed clues, with paired differences of -0.113 (95% CI -0.167 to -0.067)
+and -0.466 (95% CI -0.502 to -0.431). In threshold sweeps, a freshness limit
+of 20 caused stale facts to be returned (accuracy 0.5, stale-error rate 0.5),
+while a confidence threshold of 0.3 caused low-confidence facts to be returned
+(accuracy 0.5, uncertainty-error rate 0.5). These are outcomes of a
+deterministic symbolic simulator whose policy reads explicit keys and metadata,
+not measurements of deployed agents, language understanding, or general
+reasoning. The generated summary includes confidence intervals and outcomes
+for every intervention.
 
 ## Model and experiment details
 

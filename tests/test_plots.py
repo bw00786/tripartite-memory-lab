@@ -79,6 +79,9 @@ def test_agent_plot_and_summary_include_task_metrics(tmp_path) -> None:
                 "mean_accuracy": accuracy,
                 "accuracy_ci_low": accuracy - 0.05,
                 "accuracy_ci_high": accuracy + 0.05,
+                "accuracy_delta_vs_single_agent": accuracy - 1.0,
+                "accuracy_delta_vs_single_agent_ci_low": accuracy - 1.0,
+                "accuracy_delta_vs_single_agent_ci_high": accuracy - 1.0,
                 "mean_exact_retrieval": accuracy,
                 "exact_retrieval_ci_low": accuracy - 0.05,
                 "exact_retrieval_ci_high": accuracy + 0.05,
@@ -105,9 +108,7 @@ def test_agent_plot_and_summary_include_task_metrics(tmp_path) -> None:
     assert image_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert "Brier score" in summary_path.read_text(encoding="utf-8")
     assert "private_memory" in summary_path.read_text(encoding="utf-8")
-    assert "lower in 1/1 task/team-size comparisons" in summary_path.read_text(
-        encoding="utf-8"
-    )
+    assert "below zero in 1/1" in summary_path.read_text(encoding="utf-8")
 
 
 def test_agent_summary_compares_matching_sweep_values(tmp_path) -> None:
@@ -120,6 +121,9 @@ def test_agent_summary_compares_matching_sweep_values(tmp_path) -> None:
                 "mean_accuracy": accuracy,
                 "accuracy_ci_low": accuracy,
                 "accuracy_ci_high": accuracy,
+                "accuracy_delta_vs_single_agent": 0.0,
+                "accuracy_delta_vs_single_agent_ci_low": 0.0,
+                "accuracy_delta_vs_single_agent_ci_high": 0.0,
                 "mean_exact_retrieval": accuracy,
                 "exact_retrieval_ci_low": accuracy,
                 "exact_retrieval_ci_high": accuracy,
@@ -145,6 +149,7 @@ def test_agent_summary_compares_matching_sweep_values(tmp_path) -> None:
     write_agent_summary({"sweep": results}, summary_path)
 
     assert (
-        "shared_memory: higher in 0/2, equal in 2/2, lower in 0/2"
+        "shared_memory: paired CI above zero in 0/2, below zero in 0/2, "
+        "and crossing zero in 2/2"
         in summary_path.read_text(encoding="utf-8")
     )

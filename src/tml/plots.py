@@ -353,11 +353,12 @@ def write_agent_summary(
         "",
         (
             "| Config | Task | Setup | Team-size setting | Accuracy (95% CI) | Exact "
-            "retrieval (95% CI) | Stale errors | Conflict errors | "
+            "retrieval (95% CI) | Paired accuracy delta vs single-agent (95% CI) | "
+            "Stale errors | Conflict errors | "
             "Uncertainty errors | Brier score | "
             "Latency ms | Compute units | API cost USD |"
         ),
-        "|---|---|---|---:|---|---|---:|---:|---:|---:|---:|---:|",
+        "|---|---|---|---:|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for config_name, frame in results_by_config.items():
         if not {"task", "setup", "team_size", "mean_accuracy"}.issubset(
@@ -365,6 +366,18 @@ def write_agent_summary(
         ):
             continue
         for row in frame.itertuples():
+            has_paired_delta = {
+                "accuracy_delta_vs_single_agent",
+                "accuracy_delta_vs_single_agent_ci_low",
+                "accuracy_delta_vs_single_agent_ci_high",
+            }.issubset(frame.columns)
+            paired_delta = "N/A"
+            if has_paired_delta and np.isfinite(row.accuracy_delta_vs_single_agent):
+                paired_delta = (
+                    f"{row.accuracy_delta_vs_single_agent:.3f} "
+                    f"[{row.accuracy_delta_vs_single_agent_ci_low:.3f}, "
+                    f"{row.accuracy_delta_vs_single_agent_ci_high:.3f}]"
+                )
             lines.append(
                 f"| {config_name} | {row.task} | {row.setup} | {row.team_size} | "
                 f"{row.mean_accuracy:.3f} "
@@ -372,6 +385,7 @@ def write_agent_summary(
                 f"{row.mean_exact_retrieval:.3f} "
                 f"[{row.exact_retrieval_ci_low:.3f}, "
                 f"{row.exact_retrieval_ci_high:.3f}] | "
+                f"{paired_delta} | "
                 f"{row.mean_stale_error_rate:.3f} | "
                 f"{row.mean_conflict_error_rate:.3f} | "
                 f"{row.mean_uncertainty_error_rate:.3f} | "
@@ -383,9 +397,10 @@ def write_agent_summary(
     lines.extend(
         [
             "",
-            "Accuracy comparison with the single-agent setup (counts compare "
-            "observed means only; confidence intervals are per-condition, not "
-            "paired tests):",
+            "Paired accuracy contrasts use trial-level differences from the "
+            "single-agent setup and a bootstrap interval over those differences. "
+            "Intervals crossing zero are inconclusive; these intervals are not "
+            "adjusted for multiple comparisons.",
         ]
     )
     for config_name, frame in results_by_config.items():
@@ -393,25 +408,23 @@ def write_agent_summary(
             frame.columns
         ):
             continue
+        if "accuracy_delta_vs_single_agent_ci_low" not in frame.columns:
+            continue
         comparisons: dict[str, list[str]] = {}
         group_columns = ["task", "team_size"]
         if {"sweep", "sweep_value"}.issubset(frame.columns):
             group_columns.extend(["sweep", "sweep_value"])
         for _, group in frame.groupby(group_columns, dropna=False):
-            baseline = group.loc[group["setup"] == "single_agent", "mean_accuracy"]
-            if baseline.empty:
-                continue
-            baseline_mean = float(baseline.iloc[0])
             for row in group.itertuples():
                 if row.setup == "single_agent":
                     continue
-                outcome = (
-                    "higher"
-                    if row.mean_accuracy > baseline_mean + 1e-12
-                    else "lower"
-                    if row.mean_accuracy < baseline_mean - 1e-12
-                    else "equal"
-                )
+                if not np.isfinite(row.accuracy_delta_vs_single_agent):
+                    continue
+                outcome = "inconclusive"
+                if row.accuracy_delta_vs_single_agent_ci_low > 0:
+                    outcome = "positive"
+                elif row.accuracy_delta_vs_single_agent_ci_high < 0:
+                    outcome = "negative"
                 comparisons.setdefault(row.setup, []).append(outcome)
         if not comparisons:
             continue
@@ -419,13 +432,13 @@ def write_agent_summary(
         for setup, outcomes in sorted(comparisons.items()):
             counts = {
                 outcome: outcomes.count(outcome)
-                for outcome in ("higher", "equal", "lower")
+                for outcome in ("positive", "negative", "inconclusive")
             }
             lines.append(
-                f"  - {setup}: higher in {counts['higher']}/{len(outcomes)}, "
-                f"equal in {counts['equal']}/{len(outcomes)}, "
-                f"lower in {counts['lower']}/{len(outcomes)} task/team-size "
-                "comparisons."
+                f"  - {setup}: paired CI above zero in {counts['positive']}/"
+                f"{len(outcomes)}, below zero in {counts['negative']}/"
+                f"{len(outcomes)}, and crossing zero in "
+                f"{counts['inconclusive']}/{len(outcomes)} comparisons."
             )
     lines.append("")
     output_path.parent.mkdir(parents=True, exist_ok=True)

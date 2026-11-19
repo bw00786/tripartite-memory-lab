@@ -12,17 +12,22 @@ def _config(
     communication_budget: int = 3,
     noise_rate: float = 0.0,
     access_limit: int = 8,
+    taskset_version: int = 1,
 ) -> dict:
     return {
         "model": {
             "backend": "deterministic_simulator",
             "agent_policy": "highest_version_then_latest_timestamp",
-            "taskset_version": 1,
+            "taskset_version": taskset_version,
             "seed": 12,
             "trials": trials,
             "bootstrap_samples": 200,
             "distractors": 12,
             "delay_turns": 10,
+            "min_correction_updates": 2,
+            "max_correction_updates": 5,
+            "min_distributed_clues": 2,
+            "max_distributed_clues": 5,
             "freshness_limit": 10,
             "confidence_threshold": 0.6,
             "shared_noise_rate": noise_rate,
@@ -54,6 +59,25 @@ def test_agent_memory_results_are_seeded_and_include_cost_metrics() -> None:
     assert (first["external_model_calls"] == 0).all()
     assert (first["estimated_api_cost_usd"] == 0.0).all()
     assert (first["mean_latency_ms"] > 0).all()
+    assert (first["accuracy_delta_vs_single_agent"] == 0.0).all()
+    assert (first["accuracy_delta_vs_single_agent_ci_low"] == 0.0).all()
+    assert (first["accuracy_delta_vs_single_agent_ci_high"] == 0.0).all()
+
+
+def test_paired_accuracy_delta_uses_the_same_trials_as_baseline() -> None:
+    config = _config(
+        ["delayed_retrieval"],
+        ["single_agent", "shared_memory_noisy"],
+        noise_rate=1.0,
+        trials=30,
+    )
+
+    results = run_agent_experiment(config).set_index("setup")
+    noisy = results.loc["shared_memory_noisy"]
+
+    assert noisy["accuracy_delta_vs_single_agent"] == -1.0
+    assert noisy["accuracy_delta_vs_single_agent_ci_low"] == -1.0
+    assert noisy["accuracy_delta_vs_single_agent_ci_high"] == -1.0
 
 
 def test_private_memory_team_requires_communication_to_combine_clues() -> None:
@@ -181,3 +205,49 @@ def test_freshness_and_confidence_interventions_expose_ablation_errors() -> None
 
     assert confidence_results["mean_uncertainty_error_rate"].tolist() == [0.5, 0.0]
     assert confidence_results["mean_accuracy"].tolist() == [0.5, 1.0]
+
+
+def test_taskset_v2_varies_correction_depth_and_clue_count_reproducibly() -> None:
+    config = _config(
+        ["correction_chain", "distributed_clues"],
+        ["single_agent", "shared_memory_noisy"],
+        team_sizes=[3],
+        trials=40,
+        noise_rate=1.0,
+        taskset_version=2,
+    )
+
+    first = run_agent_experiment(config)
+    second = run_agent_experiment(config)
+
+    metrics = [
+        "mean_accuracy",
+        "mean_exact_retrieval",
+        "mean_conflict_error_rate",
+        "accuracy_delta_vs_single_agent",
+        "accuracy_delta_vs_single_agent_ci_low",
+        "accuracy_delta_vs_single_agent_ci_high",
+    ]
+    np.testing.assert_array_equal(
+        first[metrics].to_numpy(),
+        second[metrics].to_numpy(),
+    )
+    noisy = first[first["setup"] == "shared_memory_noisy"]
+    noisy_chain = noisy[noisy["task"] == "correction_chain"].iloc[0]
+    assert noisy_chain["mean_accuracy"] == 0.0
+    assert noisy_chain["mean_conflict_error_rate"] == 1.0
+
+    communication_config = _config(
+        ["distributed_clues"],
+        ["private_memory"],
+        team_sizes=[3],
+        trials=40,
+        communication_budget=3,
+        taskset_version=2,
+    )
+    communication_config["experiment"].update(
+        {"intervention": "communication_budget", "values": [0, 3]}
+    )
+    communication_results = run_agent_experiment(communication_config)
+    assert communication_results["mean_accuracy"].iloc[0] < 1.0
+    assert communication_results["mean_accuracy"].iloc[1] == 1.0

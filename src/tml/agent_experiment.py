@@ -12,6 +12,7 @@ from tml.metrics import bootstrap_ci
 TASKS = (
     "delayed_retrieval",
     "corrected_fact",
+    "correction_chain",
     "distributed_clues",
     "uncertainty_and_staleness",
 )
@@ -48,7 +49,16 @@ def _record(
 
 
 def _make_scenario(
-    task: str, trial: int, rng: np.random.Generator, distractors: int, delay: int
+    task: str,
+    trial: int,
+    rng: np.random.Generator,
+    distractors: int,
+    delay: int,
+    taskset_version: int,
+    min_correction_updates: int,
+    max_correction_updates: int,
+    min_distributed_clues: int,
+    max_distributed_clues: int,
 ) -> tuple[list[dict[str, Any]], list[str], dict[str, str | None], int, set[str]]:
     records: list[dict[str, Any]] = []
     now = delay + 2
@@ -73,10 +83,32 @@ def _make_scenario(
         stale_values.add(old_value)
         query_keys = ["account_status"]
         expected = {"account_status": new_value}
+    elif task == "correction_chain":
+        if taskset_version < 2:
+            raise ValueError("correction_chain requires taskset_version 2 or newer")
+        update_count = int(
+            rng.integers(min_correction_updates, max_correction_updates + 1)
+        )
+        now = update_count
+        key = "account_status"
+        values = [f"revision-{trial}-{index}" for index in range(update_count)]
+        records.extend(
+            _record(key, value, index, version=index)
+            for index, value in enumerate(values)
+        )
+        stale_values.update(values[:-1])
+        query_keys = [key]
+        expected = {key: values[-1]}
     elif task == "distributed_clues":
         now = 2
+        clue_count = (
+            int(rng.integers(min_distributed_clues, max_distributed_clues + 1))
+            if taskset_version >= 2
+            else 3
+        )
         expected = {
-            f"clue_{index}": f"piece-{trial}-{index}" for index in range(3)
+            f"clue_{index}": f"piece-{trial}-{index}"
+            for index in range(clue_count)
         }
         records.extend(
             _record(key, value, index)
@@ -212,7 +244,7 @@ def _trial_metrics(
     stale_errors = sum(answers.get(key) in stale_values for key in keys)
     conflict_errors = (
         sum(answers.get(key) != expected[key] for key in keys)
-        if task == "corrected_fact"
+        if task in {"corrected_fact", "correction_chain"}
         else 0
     )
     stale_task_errors = float(
@@ -281,6 +313,7 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
     seed = int(model["seed"])
     trials = int(model["trials"])
     bootstrap_samples = int(model["bootstrap_samples"])
+    taskset_version = int(model["taskset_version"])
     team_sizes = [int(value) for value in experiment["team_sizes"]]
     tasks = list(experiment.get("tasks", TASKS))
     setups = list(experiment.get("setups", SETUPS))
@@ -291,8 +324,14 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
     communication_budget = int(model["communication_budget"])
     distractors = int(model["distractors"])
     delay = int(model["delay_turns"])
+    min_correction_updates = int(model["min_correction_updates"])
+    max_correction_updates = int(model["max_correction_updates"])
+    min_distributed_clues = int(model["min_distributed_clues"])
+    max_distributed_clues = int(model["max_distributed_clues"])
     api_cost_per_call = float(model["api_cost_per_call_usd"])
 
+    if taskset_version not in (1, 2):
+        raise ValueError("taskset_version must be 1 or 2")
     if trials < 1 or bootstrap_samples < 1:
         raise ValueError("trials and bootstrap_samples must be positive")
     if not team_sizes or any(size < 1 for size in team_sizes):
@@ -313,6 +352,15 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
         raise ValueError("api_cost_per_call_usd must be non-negative")
     if distractors < 0 or delay < 1:
         raise ValueError("distractors must be non-negative and delay_turns positive")
+    if (
+        min_correction_updates < 2
+        or max_correction_updates < min_correction_updates
+        or min_distributed_clues < 2
+        or max_distributed_clues < min_distributed_clues
+    ):
+        raise ValueError("task-set difficulty bounds are invalid")
+    if "correction_chain" in tasks and taskset_version < 2:
+        raise ValueError("correction_chain requires taskset_version 2 or newer")
 
     raw: dict[tuple[str, str, int], dict[str, list[float]]] = {}
     for task in tasks:
@@ -341,6 +389,11 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
                         np.random.default_rng(scenario_seed),
                         distractors,
                         delay,
+                        taskset_version,
+                        min_correction_updates,
+                        max_correction_updates,
+                        min_distributed_clues,
+                        max_distributed_clues,
                     )
                     timer = perf_counter()
                     memories = _store_records(
@@ -378,6 +431,7 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
     rows = []
     for task, setup, team_size in raw:
         metrics = raw[(task, setup, team_size)]
+        baseline = raw.get((task, "single_agent", team_size))
         row: dict[str, Any] = {
             "task": task,
             "setup": setup,
@@ -414,5 +468,24 @@ def run_agent_experiment(config: Mapping[str, Any]) -> pd.DataFrame:
             )
             row[f"{metric}_ci_low"] = low
             row[f"{metric}_ci_high"] = high
+        for metric in ("accuracy", "exact_retrieval"):
+            delta_name = f"{metric}_delta_vs_single_agent"
+            if baseline is None:
+                row[delta_name] = np.nan
+                row[f"{delta_name}_ci_low"] = np.nan
+                row[f"{delta_name}_ci_high"] = np.nan
+                continue
+            differences = np.asarray(metrics[metric]) - np.asarray(baseline[metric])
+            row[delta_name] = float(differences.mean())
+            delta_rng = np.random.default_rng(
+                np.random.SeedSequence(
+                    [seed, team_size, setups.index(setup), tasks.index(task), 991]
+                )
+            )
+            low, high = bootstrap_ci(
+                differences, delta_rng, n_bootstrap=bootstrap_samples
+            )
+            row[f"{delta_name}_ci_low"] = low
+            row[f"{delta_name}_ci_high"] = high
         rows.append(row)
     return pd.DataFrame(rows)
